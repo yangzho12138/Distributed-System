@@ -17,7 +17,7 @@ func handleConnection(conn net.Conn){
 		var buf = make([]byte, 1024)
 
 		before := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(1000000000), 'f', 9, 64)
-		n, err := conn.Read(buf)
+		n, err := conn.Read(buf) // n is the byte read from connection
 		after := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(1000000000), 'f', 9, 64)
 
 		message := string(buf[:n])

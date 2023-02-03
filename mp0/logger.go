@@ -5,6 +5,9 @@ import (
 	"log"
 	"os"
 	"fmt"
+	"time"
+	"strings"
+	"strconv"
 )
 
 func handleConnection(conn net.Conn){
@@ -13,13 +16,23 @@ func handleConnection(conn net.Conn){
 	for{
 		var buf = make([]byte, 1024)
 
+		before := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(1000000000), 'f', 9, 64)
 		n, err := conn.Read(buf)
+		after := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(1000000000), 'f', 9, 64)
+
+		message := string(buf[:n])
+		if strings.Contains(message, "connected") {
+			timestamp := strings.Split(message, " ")
+			log.Println("Delay  " + timestamp[0] + " " + before + " " + after)
+		}else{
+			log.Println("Bandwidth " + strconv.Itoa(n) + " " + before + " " + after)
+		}
 
 		if err != nil {
 			log.Fatal("Error! ", err)
 		}
 
-		fmt.Println(string(buf[:n]))
+		fmt.Println(message)
 	}
 }
 
@@ -38,7 +51,15 @@ func main(){
 		log.Fatal("Error! ", err)
 	}
 	defer listener.Close()
-	log.Println("Listen to " + port + " port Success")
+	// log.Println("Listen to " + port + " port Success")
+
+	// log output
+	f, err := os.OpenFile("log.txt", os.O_CREATE|os.O_APPEND|os.O_RDWR, os.ModePerm)
+	if err != nil{
+		return
+	}
+	defer f.Close()
+	log.SetOutput(f)
 
 	// wait for connection
 	for{

@@ -23,9 +23,9 @@ func handleConnection(conn net.Conn){
 		message := string(buf[:n])
 		if strings.Contains(message, "connected") {
 			timestamp := strings.Split(message, " ")
-			log.Println("Delay  " + timestamp[0] + " " + before + " " + after)
+			log.Println("Delay  " + timestamp[0] + " " + before + " " + after) // output -> log.txt
 		}else{
-			log.Println("Bandwidth " + strconv.Itoa(n) + " " + before + " " + after)
+			log.Println("Bandwidth " + strconv.Itoa(n) + " " + before + " " + after) output -> log.txt
 		}
 
 		if err != nil {

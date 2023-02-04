@@ -21,12 +21,9 @@ func handleConnection(conn net.Conn){
 		after := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(1000000000), 'f', 9, 64)
 
 		message := string(buf[:n])
-		if strings.Contains(message, "connected") {
-			timestamp := strings.Split(message, " ")
-			log.Println("Delay  " + timestamp[0] + " " + before + " " + after) // output -> log.txt
-		}else{
-			log.Println("Bandwidth " + strconv.Itoa(n) + " " + before + " " + after) output -> log.txt
-		}
+		timestamp := strings.Split(message, " ")
+		log.Println("Delay  " + timestamp[0] + " " + before + " " + after) // output -> log.txt
+		log.Println("Bandwidth " + strconv.Itoa(n) + " " + before + " " + after) // output -> log.txt
 
 		if err != nil {
 			log.Fatal("Error! ", err)

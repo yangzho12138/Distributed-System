@@ -16,19 +16,17 @@ func handleConnection(conn net.Conn) {
 	for {
 		var buf = make([]byte, 1024)
 
-		before := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(1000000000), 'f', 9, 64)
 		n, err := conn.Read(buf) // n is the byte read from connection
-		after := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(1000000000), 'f', 9, 64)
-
-		message := string(buf[:n])
-		timestamp := strings.Split(message, " ")
-		log.Println("Delay  " + timestamp[0] + " " + before + " " + after) // output -> log.txt
-		log.Println("Bandwidth " + strconv.Itoa(n) + " " + before + " " + after) // output -> log.txt
-
-
 		if err != nil {
 			log.Fatal("Error! ", err)
 		}
+
+		message := string(buf[:n])
+		timestamp := strings.Split(message, " ")
+		current := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(1000000000), 'f', 9, 64)
+
+		// format of output: send time + receive time + bandwidth
+		log.Println(timestamp[0] + " " + current + " " + strconv.Itoa(n)) // output -> log.txt
 
 		fmt.Println(message)
 	}

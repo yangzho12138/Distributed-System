@@ -1,19 +1,19 @@
 package main
 
 import (
-	"net"
-	"log"
-	"os"
 	"fmt"
-	"time"
-	"strings"
+	"log"
+	"net"
+	"os"
 	"strconv"
+	"strings"
+	"time"
 )
 
-func handleConnection(conn net.Conn){
+func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	for{
+	for {
 		var buf = make([]byte, 1024)
 
 		before := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(1000000000), 'f', 9, 64)
@@ -25,6 +25,7 @@ func handleConnection(conn net.Conn){
 		log.Println("Delay  " + timestamp[0] + " " + before + " " + after) // output -> log.txt
 		log.Println("Bandwidth " + strconv.Itoa(n) + " " + before + " " + after) // output -> log.txt
 
+
 		if err != nil {
 			log.Fatal("Error! ", err)
 		}
@@ -33,12 +34,12 @@ func handleConnection(conn net.Conn){
 	}
 }
 
-func main(){
+func main() {
 	port := ":8080"
 	if len(os.Args) > 1 {
-		port = ":" + 
-		os.Args[1]
-	}else {
+		port = ":" +
+			os.Args[1]
+	} else {
 		log.Fatal("Please enter the port number listening to in the command line")
 	}
 
@@ -52,14 +53,14 @@ func main(){
 
 	// log output
 	f, err := os.OpenFile("log.txt", os.O_CREATE|os.O_APPEND|os.O_RDWR, os.ModePerm)
-	if err != nil{
+	if err != nil {
 		return
 	}
 	defer f.Close()
 	log.SetOutput(f)
 
 	// wait for connection
-	for{
+	for {
 		conn, err := listener.Accept()
 
 		if err != nil {

@@ -1,4 +1,5 @@
 BINARY_NAME=logger
+PORT_NUMBER=1234
 build:
 	go build
-	./$(BINARY_NAME) 1234
+	./$(BINARY_NAME) $(PORT_NUMBER) 

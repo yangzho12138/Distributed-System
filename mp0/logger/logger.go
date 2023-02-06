@@ -32,6 +32,31 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
+func deleteFile(path string){
+	e := os.Remove(path)
+    if e != nil {
+        log.Fatal(e)
+    }
+}
+
+func logFileInit(path string){
+	_, err := os.Stat(path)
+	if err != nil{
+		if os.IsExist(err){
+			deleteFile(path)
+		}
+	}
+}
+
+func logOutputInit(path string){
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_RDWR, os.ModePerm)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	log.SetOutput(f)
+}
+
 func main() {
 	port := ":8080"
 	if len(os.Args) > 1 {
@@ -47,15 +72,11 @@ func main() {
 		log.Fatal("Error! ", err)
 	}
 	defer listener.Close()
-	// log.Println("Listen to " + port + " port Success")
 
-	// log output
-	f, err := os.OpenFile("log.txt", os.O_CREATE|os.O_APPEND|os.O_RDWR, os.ModePerm)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	log.SetOutput(f)
+	logFileInit("log.txt")
+	logOutputInit("log.txt")
+	
+	fmt.Println("Listen to " + port + " port Success")
 
 	// wait for connection
 	for {

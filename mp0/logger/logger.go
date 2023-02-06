@@ -49,6 +49,10 @@ func main() {
 	defer listener.Close()
 	// log.Println("Listen to " + port + " port Success")
 
+	e := os.Remove("log.txt")
+    if e != nil {
+        log.Fatal(e)
+    }
 	// log output
 	f, err := os.OpenFile("log.txt", os.O_CREATE|os.O_APPEND|os.O_RDWR, os.ModePerm)
 	if err != nil {

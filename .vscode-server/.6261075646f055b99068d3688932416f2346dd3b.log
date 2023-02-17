@@ -1,0 +1,93 @@
+*
+* Visual Studio Code Server
+*
+* By using the software, you agree to
+* the Visual Studio Code Server License Terms (https://aka.ms/vscode-server-license) and
+* the Microsoft Privacy Statement (https://privacy.microsoft.com/en-US/privacystatement).
+*
+Server bound to 127.0.0.1:34417 (IPv4)
+Extension host agent listening on 34417
+
+[19:12:26] Extension host agent started.
+[19:12:27] [127.0.0.1][0e651f21][ManagementConnection] New connection established.
+[19:12:27] [127.0.0.1][b543c6ee][ExtensionHostConnection] New connection established.
+[19:12:27] [127.0.0.1][b543c6ee][ExtensionHostConnection] <7338> Launched Extension Host Process.
+[IPC Library: Pty Host]  WARN Shell integration cannot be enabled for executable "/bin/sh" and args [
+  '-c',
+  'wget --version > /dev/null\n' +
+    'if [ $? -eq 0 ]\n' +
+    'then\n' +
+    "\twget --connect-timeout=7 --tries=1 --dns-timeout=7 -q --header='Metadata:true' -O - http://169.254.169.254/metadata/instance?api-version=2019-03-11\n" +
+    'else\n' +
+    '\tcurl --version > /dev/null\n' +
+    '\tif [ $? -eq 0 ]\n' +
+    '\tthen\n' +
+    "\t\tcurl --connect-timeout 7 -s --header='Metadata:true' http://169.254.169.254/metadata/instance?api-version=2019-03-11\n" +
+    '\tfi\n' +
+    'fi\n' +
+    'exit 0'
+]
+[IPC Library: Pty Host]  WARN Shell integration cannot be enabled for executable "/bin/sh" and args [
+  '-c',
+  'wget --version > /dev/null\n' +
+    'if [ $? -eq 0 ]\n' +
+    'then\n' +
+    '\twget --connect-timeout=7 --tries=1 --dns-timeout=7 -q  -O - http://169.254.169.254/latest/meta-data/instance-id\n' +
+    'else\n' +
+    '\tcurl --version > /dev/null\n' +
+    '\tif [ $? -eq 0 ]\n' +
+    '\tthen\n' +
+    '\t\tcurl --connect-timeout 7 -s  http://169.254.169.254/latest/meta-data/instance-id\n' +
+    '\tfi\n' +
+    'fi\n' +
+    'exit 0'
+]
+[IPC Library: Pty Host]  WARN Shell integration cannot be enabled for executable "/bin/sh" and args [
+  '-c',
+  'wget --version > /dev/null\n' +
+    'if [ $? -eq 0 ]\n' +
+    'then\n' +
+    '\twget --connect-timeout=7 --tries=1 --dns-timeout=7 -q  -O - http://169.254.169.254/metadata/v1/id\n' +
+    'else\n' +
+    '\tcurl --version > /dev/null\n' +
+    '\tif [ $? -eq 0 ]\n' +
+    '\tthen\n' +
+    '\t\tcurl --connect-timeout 7 -s  http://169.254.169.254/metadata/v1/id\n' +
+    '\tfi\n' +
+    'fi\n' +
+    'exit 0'
+]
+[IPC Library: Pty Host]  WARN Shell integration cannot be enabled for executable "/bin/sh" and args [
+  '-c',
+  'wget --version > /dev/null\n' +
+    'if [ $? -eq 0 ]\n' +
+    'then\n' +
+    "\twget --connect-timeout=7 --tries=1 --dns-timeout=7 -q --header='Metadata-Flavor:Google' -O - http://metadata.google.internal/computeMetadata/v1/instance/id\n" +
+    'else\n' +
+    '\tcurl --version > /dev/null\n' +
+    '\tif [ $? -eq 0 ]\n' +
+    '\tthen\n' +
+    "\t\tcurl --connect-timeout 7 -s --header='Metadata-Flavor:Google' http://metadata.google.internal/computeMetadata/v1/instance/id\n" +
+    '\tfi\n' +
+    'fi\n' +
+    'exit 0'
+]
+[20:05:24] [127.0.0.1][0e651f21][ManagementConnection] The client has disconnected gracefully, so the connection will be disposed.
+[20:05:24] [127.0.0.1][b543c6ee][ExtensionHostConnection] <7338> Extension Host Process exited with code: 0, signal: null.
+Last EH closed, waiting before shutting down
+[20:05:24] Last EH closed, waiting before shutting down
+Got delay-shutdown request while in shutdown timeout, delaying
+[20:07:43] Got delay-shutdown request while in shutdown timeout, delaying
+Cancelling previous shutdown timeout
+[20:07:43] Cancelling previous shutdown timeout
+[20:07:48] [127.0.0.1][63718557][ManagementConnection] New connection established.
+[20:07:48] [127.0.0.1][98192afd][ExtensionHostConnection] New connection established.
+[20:07:48] [127.0.0.1][98192afd][ExtensionHostConnection] <11830> Launched Extension Host Process.
+[20:08:26] [127.0.0.1][63718557][ManagementConnection] The client has disconnected gracefully, so the connection will be disposed.
+[20:08:26] [127.0.0.1][98192afd][ExtensionHostConnection] <11830> Extension Host Process exited with code: 0, signal: null.
+Cancelling previous shutdown timeout
+[20:08:26] Cancelling previous shutdown timeout
+Last EH closed, waiting before shutting down
+[20:08:26] Last EH closed, waiting before shutting down
+Last EH closed, shutting down
+[20:13:26] Last EH closed, shutting down

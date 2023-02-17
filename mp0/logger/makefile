@@ -1,0 +1,5 @@
+BINARY_NAME=logger
+PORT_NUMBER=1234
+build:
+	go build
+	./$(BINARY_NAME) $(PORT_NUMBER) 

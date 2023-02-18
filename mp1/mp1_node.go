@@ -188,8 +188,8 @@ func receiveMsg(conn net.Conn){
 			maxP := 100
 			var maxPSender int
 			if len(Pp[timestamp]) == nodeNum {
-				for n = 1; n <= nodeNum; n++ {
-					if(maxP < Pp[timestamp][n].Priority){
+				for n = 0; n < nodeNum; n++ {
+					if(maxP > Pp[timestamp][n].Priority){
 						maxP = Pp[timestamp][n].Priority
 						maxPSender = Pp[timestamp][n].Sender
 					}

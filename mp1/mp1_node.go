@@ -25,6 +25,14 @@ type Node struct{
 	Port string
 }
 
+type PP struct{
+	Sender int
+	Priority int
+}
+
+// collect all the proposed priority and find the max priority and its sender
+var Pp map[string][]PP
+
 var Account map[string]int // user account
 
 var NodesToPorts map[string]Node // the port number different nodes listen to (read from config file)
@@ -35,6 +43,9 @@ var configFilePath string
 
 // priority for a process
 var proposedPriority int
+
+// read from config file
+var nodeNum int
 
 // heap interface -> priority queue
 type PriorityQueue []Message
@@ -91,7 +102,8 @@ func ReadFile(path string){
 		log.Fatal("Config file structure is uncorrect")
 	}
 	
-	nodeNum, _ := strconv.Atoi(strings.TrimSpace(line))
+	nodes, _ := strconv.Atoi(strings.TrimSpace(line))
+	nodeNum = nodes
 
 	for d := 0; d < nodeNum; d++ {
 		line, _ := buf.ReadString('\n')
@@ -99,6 +111,10 @@ func ReadFile(path string){
 		n := Node{strings.TrimSpace(nodeInfo[1]), strings.TrimSpace(nodeInfo[2])}
 		NodesToPorts[nodeInfo[0]] = n
 	}
+}
+
+func ProcessTransaction(msg Message){
+
 }
 
 func receiveMsg(conn net.Conn){
@@ -115,11 +131,11 @@ func receiveMsg(conn net.Conn){
 		message := strings.Split(string(buf[:n]), " ")
 
 		msgType := message[0]
+		sender, _ := strconv.Atoi(message[1])
+		timestamp := message[2]
+		content := message[3]
 
 		if msgType == "T" {
-			sender, _ := strconv.Atoi(message[1])
-			timestamp := message[2]
-			content := message[3]
 			// store msg in pq
 			p := proposedPriority
 			proposedPriority ++
@@ -127,9 +143,33 @@ func receiveMsg(conn net.Conn){
 			pq.Push(message)
 			// send proposed priority
 			sendMsg(strconv.Itoa(p), "PP", timestamp)
-			
 		}else if msgType == "PP" {
+			p := strconv.Atoi(content)
+			Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
 
+			maxP := 0
+			var maxPSender
+			if len(Pp[timestamp] == nodeNum){
+				for n = 0; n < nodeNum; n++ {
+					if(maxP < Pp[timestamp][n].Priority){
+						maxP = Pp[timestamp][n].Priority
+						maxPSender = Pp[timestamp][n].Sender
+					}
+				}
+			}
+			// update own msg in pq
+			pq.Update(timestamp, maxP, maxPSender)
+			// send agreed priority
+			sendMsg(strconv.Itoa(maxP) + "|" + strconv.Itoa(maxPSender), "PA", timestamp)
+
+			// deal with deliverable msg in pq
+			for{
+				if pq.Top().DeliverStatus == false {
+					break
+				}
+				msg := pq.Pop()
+				ProcessTransaction(msg)
+			}
 		}else if msgType == "PA" {
 
 		}
@@ -139,9 +179,18 @@ func receiveMsg(conn net.Conn){
 
 // send msg format: Type + Sender + Timestamp + Content
 // Type: T(Transaction) / PP(Priority Proposed) / PA(Priority Agreed)
-// Content: T-Transaction Content; PP-Proposed Priority; PA Agreed Priority
+// Content: T-Transaction Content; PP-Proposed Priority; PA-Agreed Priority|Agreed Priority Sender
 func sendMsg(msg string, msgType string, timestamp string) {
 	if msgType == "T"{
+		// create msg and store in pq
+		sender, _ := strconv.Atoi(node[4:])
+		p := proposedPriority
+		proposedPriority++
+		message := Message{timestamp, false, p, sender, msg}
+		Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
+		pq.Push(message)
+
+		// multicast
 		for key, value := range NodesToPorts{
 			if key != node{
 				// send transaction msg to other nodes
@@ -150,21 +199,20 @@ func sendMsg(msg string, msgType string, timestamp string) {
 					log.Fatal("Connection Failed", err)
 				}
 				defer conn.Close()
-
-				num, _ := strconv.Atoi(node[4:])
-				p := proposedPriority
-				proposedPriority++
-				message := Message{timestamp, false, p, num, msg}
-				pq.Push(message)
 				conn.Write([]byte(msgType + " " + node[4:] + " " + timestamp + " " + msg))
 			}
 		}
 	}else if msgType == "PP"{
-		// for key, value := range NodesToPorts{
-		// 	if key != node{
-
-		// 	}
-		// }
+		for key, value := range NodesToPorts{
+			if key != node{
+				conn, err := net.Dial("tcp", value.Address + ":" + value.Port)
+				if err != nil {
+					log.Fatal("Connection Failed", err)
+				}
+				defer conn.Close()
+				conn.Write([]byte(msgType + " " + node[4:] + " " + timestamp + " " + msg))
+			}
+		}
 
 	}else if msgType == "PA"{
 
@@ -192,6 +240,8 @@ func main(){
 	}
 
 	ReadFile(configFilePath)
+
+	fmt.Println(nodeNum)
 
 	// init proposed priority
 	proposedPriority = 1

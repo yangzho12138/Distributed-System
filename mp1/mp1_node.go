@@ -137,8 +137,8 @@ func ProcessTransaction(msg Message){
 		if value != 0 {
 			fmt.Print(key + ":" + strconv.Itoa(value) + " ")
 		}
-		fmt.Print("\n")
 	}
+	fmt.Print("\n")
 
 }
 

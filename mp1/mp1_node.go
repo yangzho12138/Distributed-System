@@ -118,12 +118,12 @@ func ProcessTransaction(msg Message){
 	tInfo := strings.Split(t, " ")
 	if tInfo[0] == "DEPOSIT" {
 		user := tInfo[1]
-		amount := strconv.Atoi(tInfo[2])
+		amount, _ := strconv.Atoi(tInfo[2])
 		Account[user] = Account[user] + amount
 	}else if tInfo[0] == "TRANSFER" {
 		userFrom := tInfo[1]
 		userTo := tInfo[3]
-		amount := strconv.Atoi(tInfo[4])
+		amount, _ := strconv.Atoi(tInfo[4])
 		if Account[userFrom] > amount {
 			Account[userFrom] = Account[userFrom] - amount
 			Account[userTo] = Account[userTo] + amount
@@ -137,6 +137,18 @@ func ProcessTransaction(msg Message){
 		}
 	}
 
+}
+
+// deal with deliverable msg in pq
+func ProcessPQ(){
+	for{
+		top, _ := pq.Top().(Message)
+		if top.DeliverStatus == false {
+			break
+		}
+		msg, _ := pq.Pop().(Message)
+		ProcessTransaction(msg)
+	}
 }
 
 func receiveMsg(conn net.Conn){
@@ -164,14 +176,14 @@ func receiveMsg(conn net.Conn){
 			message := Message{timestamp, false, p, sender, content}
 			pq.Push(message)
 			// send proposed priority
-			sendMsg(strconv.Itoa(p), "PP", timestamp)
+			go sendMsg(strconv.Itoa(p), "PP", timestamp)
 		}else if msgType == "PP" {
-			p := strconv.Atoi(content)
+			p, _ := strconv.Atoi(content)
 			Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
 
 			maxP := 0
-			var maxPSender
-			if len(Pp[timestamp] == nodeNum){
+			var maxPSender int
+			if len(Pp[timestamp]) == nodeNum {
 				for n = 0; n < nodeNum; n++ {
 					if(maxP < Pp[timestamp][n].Priority){
 						maxP = Pp[timestamp][n].Priority
@@ -182,20 +194,37 @@ func receiveMsg(conn net.Conn){
 			// update own msg in pq
 			pq.Update(timestamp, maxP, maxPSender)
 			// send agreed priority
-			sendMsg(strconv.Itoa(maxP) + "|" + strconv.Itoa(maxPSender), "PA", timestamp)
+			go sendMsg(strconv.Itoa(maxP) + "|" + strconv.Itoa(maxPSender), "PA", timestamp)
 
 			// deal with deliverable msg in pq
-			for{
-				if pq.Top().DeliverStatus == false {
-					break
-				}
-				msg := pq.Pop()
-				ProcessTransaction(msg)
-			}
+			ProcessPQ()
 		}else if msgType == "PA" {
+			pa := strings.Split(content, "|")
+			maxP, _ := strconv.Atoi(pa[0])
+			maxPSender, _ := strconv.Atoi(pa[1])
 
+			// update own msg in pq
+			pq.Update(timestamp, maxP, maxPSender)
+
+			// deal with deliverable msg in pq
+			ProcessPQ()
 		}
 
+	}
+}
+
+func Multicast(msg string, msgType string, timestamp string){
+	// multicast
+	for key, value := range NodesToPorts{
+		if key != node{
+			// send transaction msg to other nodes
+			conn, err := net.Dial("tcp", value.Address + ":" + value.Port)
+			if err != nil {
+				log.Fatal("Connection Failed", err)
+			}
+			defer conn.Close()
+			conn.Write([]byte(msgType + " " + node[4:] + " " + timestamp + " " + msg))
+		}
 	}
 }
 
@@ -213,31 +242,11 @@ func sendMsg(msg string, msgType string, timestamp string) {
 		pq.Push(message)
 
 		// multicast
-		for key, value := range NodesToPorts{
-			if key != node{
-				// send transaction msg to other nodes
-				conn, err := net.Dial("tcp", value.Address + ":" + value.Port)
-				if err != nil {
-					log.Fatal("Connection Failed", err)
-				}
-				defer conn.Close()
-				conn.Write([]byte(msgType + " " + node[4:] + " " + timestamp + " " + msg))
-			}
-		}
+		Multicast(msg, msgType, timestamp)
 	}else if msgType == "PP"{
-		for key, value := range NodesToPorts{
-			if key != node{
-				conn, err := net.Dial("tcp", value.Address + ":" + value.Port)
-				if err != nil {
-					log.Fatal("Connection Failed", err)
-				}
-				defer conn.Close()
-				conn.Write([]byte(msgType + " " + node[4:] + " " + timestamp + " " + msg))
-			}
-		}
-
+		Multicast(msg, msgType, timestamp)
 	}else if msgType == "PA"{
-
+		Multicast(msg, msgType, timestamp)
 	}
 }
 
@@ -272,21 +281,8 @@ func main(){
 	Account = make(map[string]int)
 	Pp = make(map[string][]PP)
 
-	m1 := Message{"A", false, 2, 1, "1234"}
-	m2 := Message{"B", false, 5, 2, "124"}
 	pq := &PriorityQueue{}
 	heap.Init(pq)
-
-	pq.Push(m1)
-	pq.Push(m2)
-
-	fmt.Println(*pq)
-
-	pq.Update("B", 2, 2)
-
-	fmt.Println(*pq)
-	fmt.Println(pq.Top())
-	fmt.Println(*pq)
 
 	// listen to port
 	listener, err := net.Listen("tcp",":" + NodesToPorts[node].Port)

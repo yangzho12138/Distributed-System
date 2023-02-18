@@ -37,6 +37,8 @@ var Account map[string]int // user account
 
 var NodesToPorts map[string]Node // the port number different nodes listen to (read from config file)
 
+var DialConnections map[string]net.Conn // store the connections
+
 // read from command line
 var node string
 var configFilePath string
@@ -110,6 +112,12 @@ func ReadFile(path string){
 		nodeInfo := strings.Split(line, " ")
 		n := Node{strings.TrimSpace(nodeInfo[1]), strings.TrimSpace(nodeInfo[2])}
 		NodesToPorts[nodeInfo[0]] = n
+
+		conn, err := net.Dial("tcp", nodeInfo[1] + ":" + nodeInfo[2])
+		if err != nil {
+			log.Fatal("Connection Failed ", err)
+		}
+		defer conn.Close()
 	}
 }
 
@@ -217,15 +225,11 @@ func receiveMsg(conn net.Conn){
 
 func Multicast(msg string, msgType string, timestamp string){
 	// multicast
-	for key, value := range NodesToPorts{
+	for key, _ := range NodesToPorts{
 		// fmt.Println(key + " " + value.Address + " " + value.Port)
 		if key != node{
 			// send transaction msg to other nodes
-			conn, err := net.Dial("tcp", value.Address + ":" + value.Port)
-			if err != nil {
-				log.Fatal("Connection Failed ", err)
-			}
-			defer conn.Close()
+			conn := DialConnections[key]
 			conn.Write([]byte(msgType + " " + node[4:] + " " + timestamp + " " + msg))
 		}
 	}

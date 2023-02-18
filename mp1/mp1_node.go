@@ -114,6 +114,28 @@ func ReadFile(path string){
 }
 
 func ProcessTransaction(msg Message){
+	t := msg.Transaction
+	tInfo := strings.Split(t, " ")
+	if tInfo[0] == "DEPOSIT" {
+		user := tInfo[1]
+		amount := strconv.Atoi(tInfo[2])
+		Account[user] = Account[user] + amount
+	}else if tInfo[0] == "TRANSFER" {
+		userFrom := tInfo[1]
+		userTo := tInfo[3]
+		amount := strconv.Atoi(tInfo[4])
+		if Account[userFrom] > amount {
+			Account[userFrom] = Account[userFrom] - amount
+			Account[userTo] = Account[userTo] + amount
+		}
+	}
+
+	fmt.Print("BALANCES ")
+	for key, value := range Account{
+		if value != 0 {
+			fmt.Print(key + ":" + strconv.Itoa(value) + " ")
+		}
+	}
 
 }
 
@@ -246,7 +268,9 @@ func main(){
 	// init proposed priority
 	proposedPriority = 1
 
-	Account = make(map[string]int) // initial map
+	// initial map
+	Account = make(map[string]int)
+	Pp = make(map[string][]PP)
 
 	m1 := Message{"A", false, 2, 1, "1234"}
 	m2 := Message{"B", false, 5, 2, "124"}

@@ -185,10 +185,10 @@ func receiveMsg(conn net.Conn){
 			p, _ := strconv.Atoi(content)
 			Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
 
-			maxP := 0
+			maxP := 100
 			var maxPSender int
 			if len(Pp[timestamp]) == nodeNum {
-				for n = 0; n < nodeNum; n++ {
+				for n = 1; n <= nodeNum; n++ {
 					if(maxP < Pp[timestamp][n].Priority){
 						maxP = Pp[timestamp][n].Priority
 						maxPSender = Pp[timestamp][n].Sender
@@ -279,6 +279,7 @@ func main(){
 	// initial map
 	Account = make(map[string]int)
 	Pp = make(map[string][]PP)
+	DialConnections = make(map[string]net.Conn)
 
 	pq := &PriorityQueue{}
 	heap.Init(pq)

@@ -117,6 +117,7 @@ func ReadFile(path string){
 		if err != nil {
 			log.Fatal("Connection Failed ", err)
 		}
+		DialConnections[nodeInfo[0]] = conn
 		defer conn.Close()
 	}
 }

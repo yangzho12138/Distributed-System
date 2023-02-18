@@ -164,7 +164,7 @@ func receiveMsg(conn net.Conn){
 			log.Fatal("Error3! ", err)
 		}
 
-		fmt.Println(string(buf[:n]))
+		// fmt.Println(string(buf[:n]))
 
 		message := strings.Split(string(buf[:n]), " ")
 
@@ -178,7 +178,7 @@ func receiveMsg(conn net.Conn){
 			content = message[3] + " " + message[4] + " " + message[5] + " " + message[6] + " " + message[7]
 		}
 
-		fmt.Println("receive msg: " + msgType +" "+ message[1] +" "+ timestamp +" "+ content)
+		// fmt.Println("receive msg: " + msgType +" "+ message[1] +" "+ timestamp +" "+ content)
 
 		if msgType == "T" {
 			// store msg in pq

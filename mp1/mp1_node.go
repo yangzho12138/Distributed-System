@@ -172,6 +172,11 @@ func receiveMsg(conn net.Conn){
 		sender, _ := strconv.Atoi(message[1])
 		timestamp := message[2]
 		content := message[3]
+		if content == "DEPOSIT"{
+			content = message[3] + " " + message[4] + " " + message[5]
+		}else if content == "TRANSFER"{
+			content = message[3] + " " + message[4] + " " + message[5] + " " + message[6] + " " + message[7]
+		}
 
 		if msgType == "T" {
 			// store msg in pq
@@ -185,7 +190,7 @@ func receiveMsg(conn net.Conn){
 			p, _ := strconv.Atoi(content)
 			Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
 
-			maxP := 100
+			maxP :=  4294967295
 			var maxPSender int
 			if len(Pp[timestamp]) == nodeNum {
 				for n = 0; n < nodeNum; n++ {

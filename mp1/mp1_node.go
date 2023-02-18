@@ -216,6 +216,7 @@ func receiveMsg(conn net.Conn){
 func Multicast(msg string, msgType string, timestamp string){
 	// multicast
 	for key, value := range NodesToPorts{
+		fmt.Println(key + " " + value.Address + " " + value.Port)
 		if key != node{
 			// send transaction msg to other nodes
 			conn, err := net.Dial("tcp", value.Address + ":" + value.Port)
@@ -272,8 +273,6 @@ func main(){
 
 	ReadFile(configFilePath)
 
-	fmt.Println(nodeNum)
-
 	// init proposed priority
 	proposedPriority = 1
 
@@ -290,6 +289,10 @@ func main(){
 		log.Fatal("Error! ", err)
 	}
 	defer listener.Close()
+
+	fmt.Println("listen successfully")
+
+	time.Sleep(10e9 * 10)
 
 	// send message
 	go send()

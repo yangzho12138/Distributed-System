@@ -112,13 +112,6 @@ func ReadFile(path string){
 		nodeInfo := strings.Split(line, " ")
 		n := Node{strings.TrimSpace(nodeInfo[1]), strings.TrimSpace(nodeInfo[2])}
 		NodesToPorts[nodeInfo[0]] = n
-
-		conn, err := net.Dial("tcp", strings.TrimSpace(nodeInfo[1]) + ":" + strings.TrimSpace(nodeInfo[2]))
-		if err != nil {
-			log.Fatal("Connection Failed ", err)
-		}
-		DialConnections[nodeInfo[0]] = conn
-		defer conn.Close()
 	}
 }
 
@@ -278,8 +271,6 @@ func main(){
 		log.Fatal("Please enter the node number and config file in the command line")
 	}
 
-	time.Sleep(10e9)
-
 	ReadFile(configFilePath)
 
 	// init proposed priority
@@ -300,6 +291,19 @@ func main(){
 	defer listener.Close()
 
 	fmt.Println("listen successfully")
+
+	time.Sleep(10e9)
+
+	for i := 1; i <= nodeNum; i++ {
+		n := "node" + strconv.Itoa(i)
+		value := NodesToPorts[n]
+		conn, err := net.Dial("tcp",  value.Address + ":" + value.Port)
+		if err != nil {
+			log.Fatal("Connection Failed ", err)
+		}
+		DialConnections[n] = conn
+		defer conn.Close()
+	}
 
 	// send message
 	go send()

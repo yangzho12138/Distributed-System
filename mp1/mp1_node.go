@@ -178,6 +178,8 @@ func receiveMsg(conn net.Conn){
 			content = message[3] + " " + message[4] + " " + message[5] + " " + message[6] + " " + message[7]
 		}
 
+		fmt.Println("receive msg: " + msgType +" "+ message[1] +" "+ timestamp +" "+ content)
+
 		if msgType == "T" {
 			// store msg in pq
 			p := proposedPriority
@@ -190,11 +192,11 @@ func receiveMsg(conn net.Conn){
 			p, _ := strconv.Atoi(content)
 			Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
 
-			maxP :=  4294967295
+			maxP :=  0
 			var maxPSender int
 			if len(Pp[timestamp]) == nodeNum {
 				for n = 0; n < nodeNum; n++ {
-					if(maxP > Pp[timestamp][n].Priority){
+					if(maxP < Pp[timestamp][n].Priority){
 						maxP = Pp[timestamp][n].Priority
 						maxPSender = Pp[timestamp][n].Sender
 					}

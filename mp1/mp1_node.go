@@ -10,6 +10,7 @@ import(
 	"strings"
 	"net"
 	"time"
+	"encoding/json"
 )
 
 type Message struct{
@@ -30,6 +31,14 @@ type PP struct{
 	Priority int
 }
 
+// msg json format
+type MsgJson struct{
+	MsgType string `json:"msgType"`
+	Sender string `json:"sender"`
+	TimeStamp string `json:"timestamp"`
+	Content string `json:"content"`
+}
+
 // collect all the proposed priority and find the max priority and its sender
 var Pp map[string][]PP
 
@@ -41,30 +50,35 @@ var DialConnections map[string]net.Conn // store the connections
 
 // read from command line
 var node string
+
 var configFilePath string
 
 // priority for a process
 var proposedPriority int
+
+// priority to store the multicasts
+var pq PriorityQueue
 
 // read from config file
 var nodeNum int
 
 // heap interface -> priority queue
 type PriorityQueue []Message
+
 // methods of PriorityQueue
 func (pq PriorityQueue) Len() int {
 	return len(pq)
 }
-func (pq PriorityQueue) Less(i, j int) bool{
+func (pq PriorityQueue) Less(i, j int) bool {
 	if pq[i].Priority == pq[j].Priority{ // break ties
 		return pq[i].Sender > pq[j].Sender
 	}
 	return pq[i].Priority < pq[j].Priority
 }
-func (pq PriorityQueue) Swap(i, j int){
+func (pq PriorityQueue) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
 }
-func (pq *PriorityQueue) Pop() interface{}{
+func (pq *PriorityQueue) Pop() interface{} {
 	old := *pq
 	n := len(old)
 	x := old[n-1]
@@ -74,7 +88,7 @@ func (pq *PriorityQueue) Pop() interface{}{
 func (pq *PriorityQueue) Push(x interface{}) {
 	*pq = append(*pq, x.(Message))
 }
-func (pq PriorityQueue) Update(timestamp string, priority int, sender int){
+func (pq PriorityQueue) Update(timestamp string, priority int, sender int) {
 	for i := 0; i < len(pq); i++{
 		if pq[i].DeliverStatus == false && pq[i].TimeStamp == timestamp {
 			pq[i].Priority = priority
@@ -83,14 +97,14 @@ func (pq PriorityQueue) Update(timestamp string, priority int, sender int){
 		}
 	}
 }
-func(pq *PriorityQueue) Top() interface{}{
+func(pq *PriorityQueue) Top() interface{} {
 	old := *pq
 	n := len(old)
 	x := old[n-1]
 	return x
 }
 
-func ReadFile(path string){
+func ReadFile(path string) {
 	NodesToPorts = make(map[string]Node)
 
 	f, err := os.Open(path)
@@ -115,14 +129,14 @@ func ReadFile(path string){
 	}
 }
 
-func ProcessTransaction(msg Message){
+func ProcessTransaction(msg Message) {
 	t := msg.Transaction
 	tInfo := strings.Split(t, " ")
 	if tInfo[0] == "DEPOSIT" {
 		user := tInfo[1]
 		amount, _ := strconv.Atoi(tInfo[2])
 		Account[user] = Account[user] + amount
-	}else if tInfo[0] == "TRANSFER" {
+	} else if tInfo[0] == "TRANSFER" {
 		userFrom := tInfo[1]
 		userTo := tInfo[3]
 		amount, _ := strconv.Atoi(tInfo[4])
@@ -133,7 +147,7 @@ func ProcessTransaction(msg Message){
 	}
 
 	fmt.Print("BALANCES ")
-	for key, value := range Account{
+	for key, value := range Account {
 		if value != 0 {
 			fmt.Print(key + ":" + strconv.Itoa(value) + " ")
 		}
@@ -154,50 +168,39 @@ func ProcessPQ(){
 	}
 }
 
-func receiveMsg(conn net.Conn){
+func receiveMsg(conn net.Conn) {
 	defer conn.Close()
 
-	for{
-		var buf = make([]byte, 1024)
-
-		n, err := conn.Read(buf)
+	for {
+		var msgJson MsgJson
+		err := json.NewDecoder(conn).Decode(&msgJson)
 		if err != nil {
-			log.Fatal("Error3! ", err)
-		}
+            log.Println(err)
+            continue
+        }
 
-		// fmt.Println(string(buf[:n]))
-
-		message := strings.Split(string(buf[:n]), " ")
-
-		msgType := message[0]
-		sender, _ := strconv.Atoi(message[1])
-		timestamp := message[2]
-		content := message[3]
-		if content == "DEPOSIT"{
-			content = message[3] + " " + message[4] + " " + message[5]
-		}else if content == "TRANSFER"{
-			content = message[3] + " " + message[4] + " " + message[5] + " " + message[6] + " " + message[7]
-		}
-
-		// fmt.Println("receive msg: " + msgType +" "+ message[1] +" "+ timestamp +" "+ content)
+		msgType := msgJson.MsgType
+		sender, _ := strconv.Atoi(msgJson.Sender)
+		timestamp := msgJson.TimeStamp
+		content := msgJson.Content
 
 		if msgType == "T" {
 			// store msg in pq
 			p := proposedPriority
-			proposedPriority ++
+			proposedPriority++
 			message := Message{timestamp, false, p, sender, content}
 			pq.Push(message)
 			// send proposed priority
 			go sendMsg(strconv.Itoa(p), "PP", timestamp)
-		}else if msgType == "PP" {
+		} else if msgType == "PP" {
 			p, _ := strconv.Atoi(content)
 			Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
 
 			maxP :=  0
 			var maxPSender int
 			if len(Pp[timestamp]) == nodeNum {
-				for n = 0; n < nodeNum; n++ {
-					if(maxP < Pp[timestamp][n].Priority){
+				for n := 0; n < nodeNum; n++ {
+					if(maxP < Pp[timestamp][n].Priority) {
 						maxP = Pp[timestamp][n].Priority
 						maxPSender = Pp[timestamp][n].Sender
 					}
@@ -210,7 +213,7 @@ func receiveMsg(conn net.Conn){
 
 			// deal with deliverable msg in pq
 			ProcessPQ()
-		}else if msgType == "PA" {
+		} else if msgType == "PA" {
 			pa := strings.Split(content, "|")
 			maxP, _ := strconv.Atoi(pa[0])
 			maxPSender, _ := strconv.Atoi(pa[1])
@@ -221,18 +224,23 @@ func receiveMsg(conn net.Conn){
 			// deal with deliverable msg in pq
 			ProcessPQ()
 		}
-
 	}
 }
 
-func Multicast(msg string, msgType string, timestamp string){
+func Multicast(msg string, msgType string, timestamp string) {
 	// multicast
 	for key, _ := range NodesToPorts{
 		// fmt.Println(key + " " + value.Address + " " + value.Port)
 		if key != node{
 			// send transaction msg to other nodes
 			conn := DialConnections[key]
-			conn.Write([]byte(msgType + " " + node[4:] + " " + timestamp + " " + msg))
+			// json the msg
+			msgJson := MsgJson{MsgType: msgType, Sender: node[4:], TimeStamp: timestamp, Content: msg}
+			err := json.NewEncoder(conn).Encode(msgJson)
+			if err != nil {
+				fmt.Println("Error encoding JSON:", err)
+				return
+			}
 		}
 	}
 }
@@ -241,7 +249,7 @@ func Multicast(msg string, msgType string, timestamp string){
 // Type: T(Transaction) / PP(Priority Proposed) / PA(Priority Agreed)
 // Content: T-Transaction Content; PP-Proposed Priority; PA-Agreed Priority|Agreed Priority Sender
 func sendMsg(msg string, msgType string, timestamp string) {
-	if msgType == "T"{
+	if msgType == "T" {
 		// create msg and store in pq
 		sender, _ := strconv.Atoi(node[4:])
 		p := proposedPriority
@@ -252,9 +260,9 @@ func sendMsg(msg string, msgType string, timestamp string) {
 
 		// multicast
 		Multicast(msg, msgType, timestamp)
-	}else if msgType == "PP"{
+	} else if msgType == "PP" {
 		Multicast(msg, msgType, timestamp)
-	}else if msgType == "PA"{
+	} else if msgType == "PA" {
 		Multicast(msg, msgType, timestamp)
 	}
 }
@@ -269,18 +277,7 @@ func send() {
 	}
 }
 
-var pq PriorityQueue
-
-func main(){
-	if len(os.Args) > 1{
-		node = os.Args[1]
-		configFilePath = os.Args[2]
-	}else{
-		log.Fatal("Please enter the node number and config file in the command line")
-	}
-
-	ReadFile(configFilePath)
-
+func initialize() {
 	// init proposed priority
 	proposedPriority = 1
 
@@ -291,15 +288,27 @@ func main(){
 
 	pq := &PriorityQueue{}
 	heap.Init(pq)
+}
+
+func main() {
+	if len(os.Args) > 1{
+		node = os.Args[1]
+		configFilePath = os.Args[2]
+	} else {
+		log.Println("Please enter the node number and config file in the command line")
+	}
+
+	ReadFile(configFilePath)
+	go initialize()
 
 	// listen to port
 	listener, err := net.Listen("tcp",":" + NodesToPorts[node].Port)
 	if err != nil {
-		log.Fatal("Error1! ", err)
+		log.Println("Failed to listen on port ", err)
 	}
 	defer listener.Close()
 
-	fmt.Println("listen successfully")
+	fmt.Println("Listen successfully")
 
 	time.Sleep(10e9)
 
@@ -308,7 +317,7 @@ func main(){
 		value := NodesToPorts[n]
 		conn, err := net.Dial("tcp",  value.Address + ":" + value.Port)
 		if err != nil {
-			log.Fatal("Connection Failed ", err)
+			log.Fatal("Connection with ", n, " failed ", err)
 		}
 		DialConnections[n] = conn
 		defer conn.Close()
@@ -317,12 +326,12 @@ func main(){
 	// send message
 	go send()
 
-	for{
+	for {
 		// listen
 		conn, err := listener.Accept()
 
 		if err != nil {
-			log.Fatal("Error2! ", err)
+			log.Println("Failed to receive message ", err)
 		}
 
 		go receiveMsg(conn)

@@ -293,6 +293,7 @@ func initialize() {
 	Account = make(map[string]int)
 	Pp = make(map[string][]PP)
 	DialConnections = make(map[string]net.Conn)
+	DialNodeNumbers = make(map[net.Conn]string)
 
 	pq := &PriorityQueue{}
 	heap.Init(pq)
@@ -307,7 +308,7 @@ func main() {
 	}
 
 	ReadFile(configFilePath)
-	go initialize()
+	initialize()
 
 	// listen to port
 	listener, err := net.Listen("tcp",":" + NodesToPorts[node].Port)

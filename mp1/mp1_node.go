@@ -47,6 +47,7 @@ var Account map[string]int // user account
 var NodesToPorts map[string]Node // the port number different nodes listen to (read from config file)
 
 var DialConnections map[string]net.Conn // store the connections
+var DialNodeNumbers map[net.Conn]string // map the connetion to node number -> failure process
 
 // read from command line
 var node string
@@ -175,8 +176,15 @@ func receiveMsg(conn net.Conn) {
 		var msgJson MsgJson
 		err := json.NewDecoder(conn).Decode(&msgJson)
 		if err != nil {
-            log.Println(err)
-            continue
+            // log.Println(err)
+            // continue
+			// node failure
+			conn.Close()
+			node := DialNodeNumbers[conn]
+			delete(DialConnections, node)
+			delete(NodesToPorts, node)
+			nodeNum = nodeNum - 1
+			break
         }
 
 		msgType := msgJson.MsgType
@@ -320,6 +328,7 @@ func main() {
 			log.Fatal("Connection with ", n, " failed ", err)
 		}
 		DialConnections[n] = conn
+		DialNodeNumbers[conn] = n
 		defer conn.Close()
 	}
 

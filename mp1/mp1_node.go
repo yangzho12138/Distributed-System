@@ -1,42 +1,42 @@
 package main
 
-import(
-	"fmt"
-	"container/heap"
-	"os"
-	"log"
+import (
 	"bufio"
+	"container/heap"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"os"
 	"strconv"
 	"strings"
-	"net"
 	"time"
-	"encoding/json"
 )
 
-type Message struct{
-	TimeStamp string // ID of a message
-	DeliverStatus bool  // true-delivered, false-not delivered
-	Priority int 
-	Sender int // which node sends the message
-	Transaction string // content of transaction
+type Message struct {
+	TimeStamp     string // ID of a message
+	DeliverStatus bool   // true-delivered, false-not delivered
+	Priority      int
+	Sender        int    // which node sends the message
+	Transaction   string // content of transaction
 }
 
-type Node struct{
+type Node struct {
 	Address string
-	Port string
+	Port    string
 }
 
-type PP struct{
-	Sender int
+type PP struct {
+	Sender   int
 	Priority int
 }
 
 // msg json format
-type MsgJson struct{
-	MsgType string `json:"msgType"`
-	Sender string `json:"sender"`
+type MsgJson struct {
+	MsgType   string `json:"msgType"`
+	Sender    string `json:"sender"`
 	TimeStamp string `json:"timestamp"`
-	Content string `json:"content"`
+	Content   string `json:"content"`
 }
 
 // collect all the proposed priority and find the max priority and its sender
@@ -46,8 +46,9 @@ var Account map[string]int // user account
 
 var NodesToPorts map[string]Node // the port number different nodes listen to (read from config file)
 
+var PortsToNodes map[string]string
+
 var DialConnections map[string]net.Conn // store the connections
-var DialNodeNumbers map[net.Conn]string // map the connetion to node number -> failure process
 
 // read from command line
 var node string
@@ -71,7 +72,7 @@ func (pq PriorityQueue) Len() int {
 	return len(pq)
 }
 func (pq PriorityQueue) Less(i, j int) bool {
-	if pq[i].Priority == pq[j].Priority{ // break ties
+	if pq[i].Priority == pq[j].Priority { // break ties
 		return pq[i].Sender > pq[j].Sender
 	}
 	return pq[i].Priority < pq[j].Priority
@@ -90,7 +91,7 @@ func (pq *PriorityQueue) Push(x interface{}) {
 	*pq = append(*pq, x.(Message))
 }
 func (pq PriorityQueue) Update(timestamp string, priority int, sender int) {
-	for i := 0; i < len(pq); i++{
+	for i := 0; i < len(pq); i++ {
 		if pq[i].DeliverStatus == false && pq[i].TimeStamp == timestamp {
 			pq[i].Priority = priority
 			pq[i].DeliverStatus = true
@@ -98,7 +99,7 @@ func (pq PriorityQueue) Update(timestamp string, priority int, sender int) {
 		}
 	}
 }
-func(pq *PriorityQueue) Top() interface{} {
+func (pq *PriorityQueue) Top() interface{} {
 	old := *pq
 	n := len(old)
 	x := old[n-1]
@@ -107,6 +108,7 @@ func(pq *PriorityQueue) Top() interface{} {
 
 func ReadFile(path string) {
 	NodesToPorts = make(map[string]Node)
+	PortsToNodes = make(map[string]string)
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -115,10 +117,10 @@ func ReadFile(path string) {
 
 	buf := bufio.NewReader(f)
 	line, err := buf.ReadString('\n')
-	if err != nil{
+	if err != nil {
 		log.Fatal("Config file structure is uncorrect")
 	}
-	
+
 	nodes, _ := strconv.Atoi(strings.TrimSpace(line))
 	nodeNum = nodes
 
@@ -127,6 +129,9 @@ func ReadFile(path string) {
 		nodeInfo := strings.Split(line, " ")
 		n := Node{strings.TrimSpace(nodeInfo[1]), strings.TrimSpace(nodeInfo[2])}
 		NodesToPorts[nodeInfo[0]] = n
+		PortsToNodes[strings.TrimSpace(nodeInfo[1])] = nodeInfo[0]
+		fmt.Println("Nodes to Ports ", NodesToPorts)
+		fmt.Println("Ports to Nodes ", PortsToNodes)
 	}
 }
 
@@ -158,8 +163,8 @@ func ProcessTransaction(msg Message) {
 }
 
 // deal with deliverable msg in pq
-func ProcessPQ(){
-	for{
+func ProcessPQ() {
+	for {
 		top, _ := pq.Top().(Message)
 		if top.DeliverStatus == false {
 			break
@@ -176,16 +181,9 @@ func receiveMsg(conn net.Conn) {
 		var msgJson MsgJson
 		err := json.NewDecoder(conn).Decode(&msgJson)
 		if err != nil {
-            // log.Println(err)
-            // continue
-			// node failure
-			conn.Close()
-			node := DialNodeNumbers[conn]
-			delete(DialConnections, node)
-			delete(NodesToPorts, node)
-			nodeNum = nodeNum - 1
-			break
-        }
+			log.Println(err)
+			return
+		}
 
 		msgType := msgJson.MsgType
 		sender, _ := strconv.Atoi(msgJson.Sender)
@@ -204,11 +202,11 @@ func receiveMsg(conn net.Conn) {
 			p, _ := strconv.Atoi(content)
 			Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
 
-			maxP :=  0
+			maxP := 0
 			var maxPSender int
 			if len(Pp[timestamp]) == nodeNum {
 				for n := 0; n < nodeNum; n++ {
-					if(maxP < Pp[timestamp][n].Priority) {
+					if maxP < Pp[timestamp][n].Priority {
 						maxP = Pp[timestamp][n].Priority
 						maxPSender = Pp[timestamp][n].Sender
 					}
@@ -217,7 +215,7 @@ func receiveMsg(conn net.Conn) {
 			// update own msg in pq
 			pq.Update(timestamp, maxP, maxPSender)
 			// send agreed priority
-			go sendMsg(strconv.Itoa(maxP) + "|" + strconv.Itoa(maxPSender), "PA", timestamp)
+			go sendMsg(strconv.Itoa(maxP)+"|"+strconv.Itoa(maxPSender), "PA", timestamp)
 
 			// deal with deliverable msg in pq
 			ProcessPQ()
@@ -237,9 +235,9 @@ func receiveMsg(conn net.Conn) {
 
 func Multicast(msg string, msgType string, timestamp string) {
 	// multicast
-	for key, _ := range NodesToPorts{
+	for key, _ := range DialConnections {
 		// fmt.Println(key + " " + value.Address + " " + value.Port)
-		if key != node{
+		if key != node {
 			// send transaction msg to other nodes
 			conn := DialConnections[key]
 			// json the msg
@@ -285,22 +283,40 @@ func send() {
 	}
 }
 
+func monitor() {
+	for {
+		for i := 1; i <= nodeNum; i++ {
+			n := "node" + strconv.Itoa(i)
+			value := NodesToPorts[n]
+			conn, ok := DialConnections[n]
+
+			if ok {
+				continue
+			}
+			conn, err := net.Dial("tcp", value.Address+":"+value.Port)
+			if err != nil {
+				continue
+			}
+			DialConnections[n] = conn
+			fmt.Println("Successfully established connection with  ", n)
+			defer conn.Close()
+		}
+	}
+}
+
 func initialize() {
 	// init proposed priority
 	proposedPriority = 1
-
 	// initial map
 	Account = make(map[string]int)
 	Pp = make(map[string][]PP)
 	DialConnections = make(map[string]net.Conn)
-	DialNodeNumbers = make(map[net.Conn]string)
-
 	pq := &PriorityQueue{}
 	heap.Init(pq)
 }
 
 func main() {
-	if len(os.Args) > 1{
+	if len(os.Args) > 1 {
 		node = os.Args[1]
 		configFilePath = os.Args[2]
 	} else {
@@ -308,10 +324,9 @@ func main() {
 	}
 
 	ReadFile(configFilePath)
-	initialize()
 
 	// listen to port
-	listener, err := net.Listen("tcp",":" + NodesToPorts[node].Port)
+	listener, err := net.Listen("tcp", ":"+NodesToPorts[node].Port)
 	if err != nil {
 		log.Println("Failed to listen on port ", err)
 	}
@@ -321,17 +336,9 @@ func main() {
 
 	time.Sleep(10e9)
 
-	for i := 1; i <= nodeNum; i++ {
-		n := "node" + strconv.Itoa(i)
-		value := NodesToPorts[n]
-		conn, err := net.Dial("tcp",  value.Address + ":" + value.Port)
-		if err != nil {
-			log.Fatal("Connection with ", n, " failed ", err)
-		}
-		DialConnections[n] = conn
-		DialNodeNumbers[conn] = n
-		defer conn.Close()
-	}
+	initialize()
+
+	go monitor()
 
 	// send message
 	go send()
@@ -342,7 +349,17 @@ func main() {
 
 		if err != nil {
 			log.Println("Failed to receive message ", err)
+			return
 		}
+
+		// go func(conn net.Conn) {
+		// 	input := bufio.NewReader(conn)
+		// 	pattern, err := input.ReadString('\n')
+		// 	fmt.Println("input is ", input)
+		// 	fmt.Println("pattern is ", pattern)
+		// 	fmt.Println("error is ", err)
+		// 	// remove connection from DialConnections
+		// }(conn)
 
 		go receiveMsg(conn)
 	}

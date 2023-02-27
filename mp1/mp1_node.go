@@ -13,12 +13,12 @@ import (
 	"time"
 )
 
-type Message struct {
-	TimeStamp     string // ID of a message
+type Transaction struct {
+	TransactionId     string // ID of a transaction
 	DeliverStatus bool   // true-delivered, false-not delivered
 	Priority      int
 	Sender        int    // which node sends the message
-	Transaction   string // content of transaction
+	Content   string // content of transaction
 }
 
 type Node struct {
@@ -26,7 +26,7 @@ type Node struct {
 	Port    string
 }
 
-type PP struct {
+type SequenceObject struct {
 	Sender   int
 	Priority int
 }
@@ -35,39 +35,43 @@ type PP struct {
 type MsgJson struct {
 	MsgType   string `json:"msgType"`
 	Sender    string `json:"sender"`
-	TimeStamp string `json:"timestamp"`
+	TransactionId string `json:"id"`
 	Content   string `json:"content"`
 }
 
-// collect all the proposed priority and find the max priority and its sender
-var Pp map[string][]PP
+// store a list of transaction and their proposed priorities by all the sender
+var SequenceOrdering map[string][]SequenceObject
 
-var Account map[string]int // user account
+// bank accounts with balance
+var Account map[string]int 
 
-var NodesToPorts map[string]Node // the port number different nodes listen to (read from config file)
+// <node, address and port on which the node is running>
+var NodesToPorts map[string]Node 
 
 var PortsToNodes map[string]string
 
-var DialConnections map[string]net.Conn // store the connections
+// store the connections 
+var DialConnections map[string]net.Conn 
 
-// read from command line
-var node string
+// node running on the host server
+var hostNode string
 
+// file path with config information
 var configFilePath string
 
-// priority for a process
-var proposedPriority int
+// next available priority value to be proposed
+var currentPriority int
 
-// priority to store the multicasts
+// priority queue to store the transactions 
 var pq PriorityQueue
 
-// read from config file
+// total number of nodes in the cluster
 var nodeNum int
 
 // heap interface -> priority queue
-type PriorityQueue []Message
+type PriorityQueue []Transaction
 
-// methods of PriorityQueue
+// methods for pq
 func (pq PriorityQueue) Len() int {
 	return len(pq)
 }
@@ -88,11 +92,11 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return x
 }
 func (pq *PriorityQueue) Push(x interface{}) {
-	*pq = append(*pq, x.(Message))
+	*pq = append(*pq, x.(Transaction))
 }
-func (pq PriorityQueue) Update(timestamp string, priority int, sender int) {
+func (pq PriorityQueue) Update(transactionId string, priority int, sender int, msgType string) {
 	for i := 0; i < len(pq); i++ {
-		if pq[i].DeliverStatus == false && pq[i].TimeStamp == timestamp {
+		if pq[i].DeliverStatus == false && pq[i].TransactionId == transactionId {
 			pq[i].Priority = priority
 			pq[i].DeliverStatus = true
 			pq[i].Sender = sender
@@ -131,22 +135,22 @@ func ReadFile(path string) {
 		NodesToPorts[nodeInfo[0]] = n
 		PortsToNodes[strings.TrimSpace(nodeInfo[1])] = nodeInfo[0]
 		fmt.Println("Nodes to Ports ", NodesToPorts)
-		fmt.Println("Ports to Nodes ", PortsToNodes)
+		fmt.Println("Ports to Nodes ", PortsToNodes) // TODO: not sure if we need this
 	}
 }
 
-func ProcessTransaction(msg Message) {
-	t := msg.Transaction
-	tInfo := strings.Split(t, " ")
-	if tInfo[0] == "DEPOSIT" {
-		user := tInfo[1]
-		amount, _ := strconv.Atoi(tInfo[2])
+func ProcessTransaction(transaction Transaction) {
+	content := transaction.Content
+	transInfo := strings.Split(content, " ")
+	if transInfo[0] == "DEPOSIT" {
+		user := transInfo[1]
+		amount, _ := strconv.Atoi(transInfo[2])
 		Account[user] = Account[user] + amount
-	} else if tInfo[0] == "TRANSFER" {
-		userFrom := tInfo[1]
-		userTo := tInfo[3]
-		amount, _ := strconv.Atoi(tInfo[4])
-		if Account[userFrom] > amount {
+	} else if transInfo[0] == "TRANSFER" {
+		userFrom := transInfo[1]
+		userTo := transInfo[3]
+		amount, _ := strconv.Atoi(transInfo[4])
+		if Account[userFrom] >= amount { // TODO: do we need some sort of mutex here
 			Account[userFrom] = Account[userFrom] - amount
 			Account[userTo] = Account[userTo] + amount
 		}
@@ -162,15 +166,15 @@ func ProcessTransaction(msg Message) {
 
 }
 
-// deal with deliverable msg in pq
+// deliver a transaction from the front of pq
 func ProcessPQ() {
 	for {
-		top, _ := pq.Top().(Message)
+		top, _ := pq.Top().(Transaction)
 		if top.DeliverStatus == false {
 			break
 		}
-		msg, _ := pq.Pop().(Message)
-		ProcessTransaction(msg)
+		transaction, _ := pq.Pop().(Transaction)
+		ProcessTransaction(transaction)
 	}
 }
 
@@ -185,63 +189,67 @@ func receiveMsg(conn net.Conn) {
 			return
 		}
 
-		msgType := msgJson.MsgType
-		sender, _ := strconv.Atoi(msgJson.Sender)
-		timestamp := msgJson.TimeStamp
 		content := msgJson.Content
+		msgType := msgJson.MsgType
+		transactionId := msgJson.TransactionId
+		sender, _ := strconv.Atoi(msgJson.Sender)
 
 		if msgType == "T" {
-			// store msg in pq
-			p := proposedPriority
-			proposedPriority++
-			message := Message{timestamp, false, p, sender, content}
-			pq.Push(message)
-			// send proposed priority
-			go sendMsg(strconv.Itoa(p), "PP", timestamp)
-		} else if msgType == "PP" {
-			p, _ := strconv.Atoi(content)
-			Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
+			// received message strcture: <transaction content, "T", transaction id, sender>
+			proposedPriority := currentPriority
+			currentPriority++
+			SequenceOrdering[transactionId] = append(SequenceOrdering[transactionId], SequenceObject{sender, proposedPriority})
+			transaction := Transaction{transactionId, false, proposedPriority, sender, content}
+			pq.Push(transaction)
 
-			maxP := 0
-			var maxPSender int
-			if len(Pp[timestamp]) == nodeNum {
+			// sent message structure: <proposed priority, "PP", transaction id>
+			go sendMsg(strconv.Itoa(proposedPriority), "PP", transactionId)
+
+		} else if msgType == "PP" {
+			// received message structure: <proposed priority, "PP", transaction id, sender>
+			proposedPriority, _ := strconv.Atoi(content)
+			SequenceOrdering[transactionId] = append(SequenceOrdering[transactionId], SequenceObject{sender, proposedPriority})
+
+			maxPriority := 0
+			var maxPrioritySender int
+			if len(SequenceOrdering[transactionId]) == nodeNum {
 				for n := 0; n < nodeNum; n++ {
-					if maxP < Pp[timestamp][n].Priority {
-						maxP = Pp[timestamp][n].Priority
-						maxPSender = Pp[timestamp][n].Sender
+					if maxPriority < SequenceOrdering[transactionId][n].Priority {
+						maxPriority = SequenceOrdering[transactionId][n].Priority
+						maxPrioritySender = SequenceOrdering[transactionId][n].Sender
+						// TODO: update SequenceOrdering ?
 					}
 				}
 			}
-			// update own msg in pq
-			pq.Update(timestamp, maxP, maxPSender)
-			// send agreed priority
-			go sendMsg(strconv.Itoa(maxP)+"|"+strconv.Itoa(maxPSender), "PA", timestamp)
+			pq.Update(transactionId, maxPriority, maxPrioritySender, msgType)
 
-			// deal with deliverable msg in pq
-			ProcessPQ()
+			// sent message structure: <agreed priority | agreed priority sender, "PA", transaction id>
+			go sendMsg(strconv.Itoa(maxPriority)+"|"+strconv.Itoa(maxPrioritySender), "PA", transactionId)
+
+			ProcessPQ() // TODO: shouldn't mark the transaction as deliverable at this point
+
 		} else if msgType == "PA" {
-			pa := strings.Split(content, "|")
-			maxP, _ := strconv.Atoi(pa[0])
-			maxPSender, _ := strconv.Atoi(pa[1])
+			// received message structure: <agreed priority | agreed priority sender, "PA", transaction id, sender>
+			agreedPriorityInfo := strings.Split(content, "|")
+			maxPriority, _ := strconv.Atoi(agreedPriorityInfo[0])
+			maxPrioritySender, _ := strconv.Atoi(agreedPriorityInfo[1])
 
-			// update own msg in pq
-			pq.Update(timestamp, maxP, maxPSender)
+			pq.Update(transactionId, maxPriority, maxPrioritySender, msgType)
 
-			// deal with deliverable msg in pq
+			// process transaction
 			ProcessPQ()
 		}
 	}
 }
 
-func Multicast(msg string, msgType string, timestamp string) {
-	// multicast
+func Multicast(msg string, msgType string, transactionId string) {
 	for key, _ := range DialConnections {
-		// fmt.Println(key + " " + value.Address + " " + value.Port)
-		if key != node {
+		if key != hostNode {	
 			// send transaction msg to other nodes
 			conn := DialConnections[key]
+
 			// json the msg
-			msgJson := MsgJson{MsgType: msgType, Sender: node[4:], TimeStamp: timestamp, Content: msg}
+			msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode[4:]}
 			err := json.NewEncoder(conn).Encode(msgJson)
 			if err != nil {
 				fmt.Println("Error encoding JSON:", err)
@@ -251,31 +259,34 @@ func Multicast(msg string, msgType string, timestamp string) {
 	}
 }
 
-// send msg format: Type + Sender + Timestamp + Content
-// Type: T(Transaction) / PP(Priority Proposed) / PA(Priority Agreed)
-// Content: T-Transaction Content; PP-Proposed Priority; PA-Agreed Priority|Agreed Priority Sender
-func sendMsg(msg string, msgType string, timestamp string) {
+func sendMsg(msg string, msgType string, transactionId string) {
 	if msgType == "T" {
-		// create msg and store in pq
-		sender, _ := strconv.Atoi(node[4:])
-		p := proposedPriority
-		proposedPriority++
-		message := Message{timestamp, false, p, sender, msg}
-		Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
-		pq.Push(message)
+		// create the transaction and store it into pq
+		sender, _ := strconv.Atoi(hostNode[4:])
+		proposedPriority := currentPriority
+		currentPriority++
+		transaction := Transaction{transactionId, false, proposedPriority, sender, msg}
+		SequenceOrdering[transactionId] = append(SequenceOrdering[transactionId], SequenceObject{sender, proposedPriority})
+		pq.Push(transaction)
 
-		// multicast
-		Multicast(msg, msgType, timestamp)
+		// multicast the new transaction to other nodes
+		// <transaction content, "T", transaction id>
+		Multicast(msg, msgType, transactionId)
+
 	} else if msgType == "PP" {
-		Multicast(msg, msgType, timestamp)
+		// multicast the proposed priority to other nodes
+		// <proposed priority, "PP", transaction id>
+		Multicast(msg, msgType, transactionId)
+
 	} else if msgType == "PA" {
-		Multicast(msg, msgType, timestamp)
+		// multicast the agreed priority to other nodes
+		// <agreed priority | agreed priority sender, "PP", transaction id>
+		Multicast(msg, msgType, transactionId)
 	}
 }
 
-// send transaction msg generated by scripts
-func send() {
-	// send
+// send a new transaction generated by the script
+func sendTransaction() {
 	s := bufio.NewScanner(os.Stdin)
 	for s.Scan() {
 		timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -305,11 +316,12 @@ func monitor() {
 }
 
 func initialize() {
-	// init proposed priority
-	proposedPriority = 1
-	// initial map
+	// current priority is 1 at the beginning
+	currentPriority = 1
+
+	// initialize
 	Account = make(map[string]int)
-	Pp = make(map[string][]PP)
+	SequenceOrdering = make(map[string][]SequenceObject)
 	DialConnections = make(map[string]net.Conn)
 	pq := &PriorityQueue{}
 	heap.Init(pq)
@@ -317,7 +329,7 @@ func initialize() {
 
 func main() {
 	if len(os.Args) > 1 {
-		node = os.Args[1]
+		hostNode = os.Args[1]
 		configFilePath = os.Args[2]
 	} else {
 		log.Println("Please enter the node number and config file in the command line")
@@ -325,8 +337,8 @@ func main() {
 
 	ReadFile(configFilePath)
 
-	// listen to port
-	listener, err := net.Listen("tcp", ":"+NodesToPorts[node].Port)
+	// listen on port
+	listener, err := net.Listen("tcp", ":"+NodesToPorts[hostNode].Port)
 	if err != nil {
 		log.Println("Failed to listen on port ", err)
 	}
@@ -340,11 +352,11 @@ func main() {
 
 	go monitor()
 
-	// send message
-	go send()
+	// send a new transaction
+	go sendTransaction()
 
 	for {
-		// listen
+		// listen to other nodes
 		conn, err := listener.Accept()
 
 		if err != nil {
@@ -352,6 +364,7 @@ func main() {
 			return
 		}
 
+		// TODO: I think we should handle disconnected nodes here
 		// go func(conn net.Conn) {
 		// 	input := bufio.NewReader(conn)
 		// 	pattern, err := input.ReadString('\n')

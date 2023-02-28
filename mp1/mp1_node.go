@@ -22,8 +22,10 @@ type Transaction struct {
 }
 
 type Node struct {
+	Id string
 	Address string
 	Port    string
+	Connection net.Conn
 }
 
 type SequenceObject struct {
@@ -45,16 +47,14 @@ var SequenceOrdering map[string][]SequenceObject
 // bank accounts with balance
 var Account map[string]int 
 
-// <node, address and port on which the node is running>
+// a list of node, address/port mapping
 var NodesToPorts map[string]Node 
 
-var PortsToNodes map[string]string
-
-// store the connections 
-var DialConnections map[string]net.Conn 
+// a list of actually joined nodes
+var connectedNodes map[string]*Node 
 
 // node running on the host server
-var hostNode string
+var hostNode Node
 
 // file path with config information
 var configFilePath string
@@ -111,8 +111,8 @@ func (pq *PriorityQueue) Top() interface{} {
 }
 
 func ReadFile(path string) {
+
 	NodesToPorts = make(map[string]Node)
-	PortsToNodes = make(map[string]string)
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -122,7 +122,7 @@ func ReadFile(path string) {
 	buf := bufio.NewReader(f)
 	line, err := buf.ReadString('\n')
 	if err != nil {
-		log.Fatal("Config file structure is uncorrect")
+		log.Fatal("Config file structure is incorrect")
 	}
 
 	nodes, _ := strconv.Atoi(strings.TrimSpace(line))
@@ -131,12 +131,18 @@ func ReadFile(path string) {
 	for d := 0; d < nodeNum; d++ {
 		line, _ := buf.ReadString('\n')
 		nodeInfo := strings.Split(line, " ")
-		n := Node{strings.TrimSpace(nodeInfo[1]), strings.TrimSpace(nodeInfo[2])}
-		NodesToPorts[nodeInfo[0]] = n
-		PortsToNodes[strings.TrimSpace(nodeInfo[1])] = nodeInfo[0]
-		fmt.Println("Nodes to Ports ", NodesToPorts)
-		fmt.Println("Ports to Nodes ", PortsToNodes) // TODO: not sure if we need this
+		node := Node {
+			Id: strings.TrimSpace(nodeInfo[0]),
+			Address: strings.TrimSpace(nodeInfo[1]), 
+			Port: strings.TrimSpace(nodeInfo[2]),
+		}
+		NodesToPorts[node.Id] = node
+		if node.Id == os.Args[1] {
+			hostNode = node
+		}
+		fmt.Println("Nodes to Ports: ", NodesToPorts)
 	}
+
 }
 
 func ProcessTransaction(transaction Transaction) {
@@ -217,7 +223,6 @@ func receiveMsg(conn net.Conn) {
 					if maxPriority < SequenceOrdering[transactionId][n].Priority {
 						maxPriority = SequenceOrdering[transactionId][n].Priority
 						maxPrioritySender = SequenceOrdering[transactionId][n].Sender
-						// TODO: update SequenceOrdering ?
 					}
 				}
 			}
@@ -243,13 +248,13 @@ func receiveMsg(conn net.Conn) {
 }
 
 func Multicast(msg string, msgType string, transactionId string) {
-	for key, _ := range DialConnections {
-		if key != hostNode {	
+	for key, _ := range connectedNodes {
+		if key != hostNode.Id {	
 			// send transaction msg to other nodes
-			conn := DialConnections[key]
+			conn := connectedNodes[key].Connection
 
 			// json the msg
-			msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode[4:]}
+			msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode.Id}
 			err := json.NewEncoder(conn).Encode(msgJson)
 			if err != nil {
 				fmt.Println("Error encoding JSON:", err)
@@ -262,7 +267,7 @@ func Multicast(msg string, msgType string, transactionId string) {
 func sendMsg(msg string, msgType string, transactionId string) {
 	if msgType == "T" {
 		// create the transaction and store it into pq
-		sender, _ := strconv.Atoi(hostNode[4:])
+		sender, _ := strconv.Atoi(hostNode.Id)
 		proposedPriority := currentPriority
 		currentPriority++
 		transaction := Transaction{transactionId, false, proposedPriority, sender, msg}
@@ -294,42 +299,67 @@ func sendTransaction() {
 	}
 }
 
+func CheckConnection(node *Node) {
+	reader := bufio.NewReader(node.Connection)
+	for {
+		_, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("has error!!")
+			log.Println(err)
+			delete(connectedNodes, node.Id)
+			return
+		}
+	}
+}
+
+func HandleNode(node *Node) {
+	defer node.Connection.Close()
+	receiveMsg(node.Connection)
+}
+
 func monitor() {
 	for {
 		for i := 1; i <= nodeNum; i++ {
-			n := "node" + strconv.Itoa(i)
-			value := NodesToPorts[n]
-			conn, ok := DialConnections[n]
+			nodeId := "node" + strconv.Itoa(i)
+			nodeInfo := NodesToPorts[nodeId]
 
+			_, ok := connectedNodes[nodeId]
 			if ok {
 				continue
 			}
-			conn, err := net.Dial("tcp", value.Address+":"+value.Port)
+			
+			conn, err := net.Dial("tcp", nodeInfo.Address + ":" + nodeInfo.Port)
 			if err != nil {
 				continue
 			}
-			DialConnections[n] = conn
-			fmt.Println("Successfully established connection with  ", n)
+
+			node := Node {
+				Id: nodeId,
+				Address: nodeInfo.Address,
+				Port: nodeInfo.Port,
+				Connection: conn,
+			}
+			connectedNodes[nodeId] = &node
+			fmt.Println("Successfully established connection with  ", nodeId)
 			defer conn.Close()
 		}
 	}
 }
 
 func initialize() {
+	connectedNodes = make(map[string]*Node)
 	// current priority is 1 at the beginning
 	currentPriority = 1
 
 	// initialize
 	Account = make(map[string]int)
 	SequenceOrdering = make(map[string][]SequenceObject)
-	DialConnections = make(map[string]net.Conn)
 	pq := &PriorityQueue{}
 	heap.Init(pq)
 }
 
 func main() {
 	if len(os.Args) > 1 {
-		hostNode = os.Args[1]
 		configFilePath = os.Args[2]
 	} else {
 		log.Println("Please enter the node number and config file in the command line")
@@ -337,13 +367,14 @@ func main() {
 
 	ReadFile(configFilePath)
 
+	fmt.Println("nodes to port is ", NodesToPorts)
+
 	// listen on port
-	listener, err := net.Listen("tcp", ":"+NodesToPorts[hostNode].Port)
+	listener, err := net.Listen("tcp", ":" + hostNode.Port)
 	if err != nil {
 		log.Println("Failed to listen on port ", err)
 	}
 	defer listener.Close()
-
 	fmt.Println("Listen successfully")
 
 	time.Sleep(10e9)
@@ -364,16 +395,11 @@ func main() {
 			return
 		}
 
-		// TODO: I think we should handle disconnected nodes here
-		// go func(conn net.Conn) {
-		// 	input := bufio.NewReader(conn)
-		// 	pattern, err := input.ReadString('\n')
-		// 	fmt.Println("input is ", input)
-		// 	fmt.Println("pattern is ", pattern)
-		// 	fmt.Println("error is ", err)
-		// 	// remove connection from DialConnections
-		// }(conn)
+		node := Node {
+			Connection: conn,
+		}
 
-		go receiveMsg(conn)
+		go CheckConnection(&node)
+		go HandleNode(&node)
 	}
 }

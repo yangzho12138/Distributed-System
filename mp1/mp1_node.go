@@ -1,76 +1,82 @@
 package main
 
-import(
-	"fmt"
-	"container/heap"
-	"os"
-	"log"
+import (
 	"bufio"
+	"container/heap"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"os"
 	"strconv"
 	"strings"
-	"net"
 	"time"
-	"encoding/json"
 )
 
-type Message struct{
-	TimeStamp string // ID of a message
-	DeliverStatus bool  // true-delivered, false-not delivered
-	Priority int 
-	Sender int // which node sends the message
-	Transaction string // content of transaction
+type Transaction struct {
+	TransactionId     string // ID of a transaction
+	DeliverStatus bool   // true-delivered, false-not delivered
+	Priority      int
+	Sender        int    // which node sends the message
+	Content   string // content of transaction
 }
 
-type Node struct{
+type Node struct {
+	Id string
 	Address string
-	Port string
+	Port    string
+	Connection net.Conn
 }
 
-type PP struct{
-	Sender int
+type SequenceObject struct {
+	Sender   int
 	Priority int
 }
 
 // msg json format
-type MsgJson struct{
-	MsgType string `json:"msgType"`
-	Sender string `json:"sender"`
-	TimeStamp string `json:"timestamp"`
-	Content string `json:"content"`
+type MsgJson struct {
+	MsgType   string `json:"msgType"`
+	Sender    string `json:"sender"`
+	TransactionId string `json:"id"`
+	Content   string `json:"content"`
 }
 
-// collect all the proposed priority and find the max priority and its sender
-var Pp map[string][]PP
+// store a list of transaction and their proposed priorities by all the sender
+var SequenceOrdering map[string][]SequenceObject
 
-var Account map[string]int // user account
+// bank accounts with balance
+var Account map[string]int 
 
-var NodesToPorts map[string]Node // the port number different nodes listen to (read from config file)
+// a list of node, address/port mapping
+var NodesToPorts map[string]Node 
 
-var DialConnections map[string]net.Conn // store the connections
+// a list of actually joined nodes
+var connectedNodes map[string]*Node 
 
-// read from command line
-var node string
+// node running on the host server
+var hostNode Node
 
+// file path with config information
 var configFilePath string
 
-// priority for a process
-var proposedPriority int
+// next available priority value to be proposed
+var currentPriority int
 
-// priority to store the multicasts
+// priority queue to store the transactions 
 var pq PriorityQueue
 
-// read from config file
+// total number of nodes in the cluster
 var nodeNum int
 
 // heap interface -> priority queue
-type PriorityQueue []Message
+type PriorityQueue []Transaction
 
-// methods of PriorityQueue
+// methods for pq
 func (pq PriorityQueue) Len() int {
 	return len(pq)
 }
 func (pq PriorityQueue) Less(i, j int) bool {
-	if pq[i].Priority == pq[j].Priority{ // break ties
+	if pq[i].Priority == pq[j].Priority { // break ties
 		return pq[i].Sender > pq[j].Sender
 	}
 	return pq[i].Priority < pq[j].Priority
@@ -86,18 +92,18 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return x
 }
 func (pq *PriorityQueue) Push(x interface{}) {
-	*pq = append(*pq, x.(Message))
+	*pq = append(*pq, x.(Transaction))
 }
-func (pq PriorityQueue) Update(timestamp string, priority int, sender int) {
-	for i := 0; i < len(pq); i++{
-		if pq[i].DeliverStatus == false && pq[i].TimeStamp == timestamp {
+func (pq PriorityQueue) Update(transactionId string, priority int, sender int, msgType string) {
+	for i := 0; i < len(pq); i++ {
+		if pq[i].DeliverStatus == false && pq[i].TransactionId == transactionId {
 			pq[i].Priority = priority
 			pq[i].DeliverStatus = true
 			pq[i].Sender = sender
 		}
 	}
 }
-func(pq *PriorityQueue) Top() interface{} {
+func (pq *PriorityQueue) Top() interface{} {
 	old := *pq
 	n := len(old)
 	x := old[n-1]
@@ -105,6 +111,7 @@ func(pq *PriorityQueue) Top() interface{} {
 }
 
 func ReadFile(path string) {
+
 	NodesToPorts = make(map[string]Node)
 
 	f, err := os.Open(path)
@@ -114,33 +121,42 @@ func ReadFile(path string) {
 
 	buf := bufio.NewReader(f)
 	line, err := buf.ReadString('\n')
-	if err != nil{
-		log.Fatal("Config file structure is uncorrect")
+	if err != nil {
+		log.Fatal("Config file structure is incorrect")
 	}
-	
+
 	nodes, _ := strconv.Atoi(strings.TrimSpace(line))
 	nodeNum = nodes
 
 	for d := 0; d < nodeNum; d++ {
 		line, _ := buf.ReadString('\n')
 		nodeInfo := strings.Split(line, " ")
-		n := Node{strings.TrimSpace(nodeInfo[1]), strings.TrimSpace(nodeInfo[2])}
-		NodesToPorts[nodeInfo[0]] = n
+		node := Node {
+			Id: strings.TrimSpace(nodeInfo[0]),
+			Address: strings.TrimSpace(nodeInfo[1]), 
+			Port: strings.TrimSpace(nodeInfo[2]),
+		}
+		NodesToPorts[node.Id] = node
+		if node.Id == os.Args[1] {
+			hostNode = node
+		}
+		fmt.Println("Nodes to Ports: ", NodesToPorts)
 	}
+
 }
 
-func ProcessTransaction(msg Message) {
-	t := msg.Transaction
-	tInfo := strings.Split(t, " ")
-	if tInfo[0] == "DEPOSIT" {
-		user := tInfo[1]
-		amount, _ := strconv.Atoi(tInfo[2])
+func ProcessTransaction(transaction Transaction) {
+	content := transaction.Content
+	transInfo := strings.Split(content, " ")
+	if transInfo[0] == "DEPOSIT" {
+		user := transInfo[1]
+		amount, _ := strconv.Atoi(transInfo[2])
 		Account[user] = Account[user] + amount
-	} else if tInfo[0] == "TRANSFER" {
-		userFrom := tInfo[1]
-		userTo := tInfo[3]
-		amount, _ := strconv.Atoi(tInfo[4])
-		if Account[userFrom] > amount {
+	} else if transInfo[0] == "TRANSFER" {
+		userFrom := transInfo[1]
+		userTo := transInfo[3]
+		amount, _ := strconv.Atoi(transInfo[4])
+		if Account[userFrom] >= amount {
 			Account[userFrom] = Account[userFrom] - amount
 			Account[userTo] = Account[userTo] + amount
 		}
@@ -156,15 +172,15 @@ func ProcessTransaction(msg Message) {
 
 }
 
-// deal with deliverable msg in pq
-func ProcessPQ(){
-	for{
-		top, _ := pq.Top().(Message)
+// deliver a transaction from the front of pq
+func ProcessPQ() {
+	for {
+		top, _ := pq.Top().(Transaction)
 		if top.DeliverStatus == false {
 			break
 		}
-		msg, _ := pq.Pop().(Message)
-		ProcessTransaction(msg)
+		transaction, _ := pq.Pop().(Transaction)
+		ProcessTransaction(transaction)
 	}
 }
 
@@ -175,67 +191,71 @@ func receiveMsg(conn net.Conn) {
 		var msgJson MsgJson
 		err := json.NewDecoder(conn).Decode(&msgJson)
 		if err != nil {
-            log.Println(err)
-            continue
-        }
+			log.Println(err)
+			return
+		}
 
-		msgType := msgJson.MsgType
-		sender, _ := strconv.Atoi(msgJson.Sender)
-		timestamp := msgJson.TimeStamp
 		content := msgJson.Content
+		msgType := msgJson.MsgType
+		transactionId := msgJson.TransactionId
+		sender, _ := strconv.Atoi(msgJson.Sender)
 
 		if msgType == "T" {
-			// store msg in pq
-			p := proposedPriority
-			proposedPriority++
-			message := Message{timestamp, false, p, sender, content}
-			pq.Push(message)
-			// send proposed priority
-			go sendMsg(strconv.Itoa(p), "PP", timestamp)
-		} else if msgType == "PP" {
-			p, _ := strconv.Atoi(content)
-			Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
+			// received message strcture: <transaction content, "T", transaction id, sender>
+			proposedPriority := currentPriority
+			currentPriority++
+			SequenceOrdering[transactionId] = append(SequenceOrdering[transactionId], SequenceObject{sender, proposedPriority})
+			transaction := Transaction{transactionId, false, proposedPriority, sender, content}
+			pq.Push(transaction)
 
-			maxP :=  0
-			var maxPSender int
-			if len(Pp[timestamp]) == nodeNum {
+			// sent message structure: <proposed priority, "PP", transaction id>
+			go sendMsg(strconv.Itoa(proposedPriority), "PP", transactionId)
+
+		} else if msgType == "PP" {
+			// received message structure: <proposed priority, "PP", transaction id, sender>
+			proposedPriority, _ := strconv.Atoi(content)
+			SequenceOrdering[transactionId] = append(SequenceOrdering[transactionId], SequenceObject{sender, proposedPriority})
+
+			maxPriority := 0
+			var maxPrioritySender int
+			if len(SequenceOrdering[transactionId]) == nodeNum {
 				for n := 0; n < nodeNum; n++ {
-					if(maxP < Pp[timestamp][n].Priority) {
-						maxP = Pp[timestamp][n].Priority
-						maxPSender = Pp[timestamp][n].Sender
+					if maxPriority < SequenceOrdering[transactionId][n].Priority {
+						maxPriority = SequenceOrdering[transactionId][n].Priority
+						maxPrioritySender = SequenceOrdering[transactionId][n].Sender
 					}
 				}
 			}
-			// update own msg in pq
-			pq.Update(timestamp, maxP, maxPSender)
-			// send agreed priority
-			go sendMsg(strconv.Itoa(maxP) + "|" + strconv.Itoa(maxPSender), "PA", timestamp)
+			pq.Update(transactionId, maxPriority, maxPrioritySender, msgType)
 
-			// deal with deliverable msg in pq
-			ProcessPQ()
+			// sent message structure: <agreed priority | agreed priority sender, "PA", transaction id>
+			// TODO no need multicast
+			go sendMsg(strconv.Itoa(maxPriority)+"|"+strconv.Itoa(maxPrioritySender), "PA", transactionId)
+
+			ProcessPQ() // TODO: shouldn't mark the transaction as deliverable at this point
+
 		} else if msgType == "PA" {
-			pa := strings.Split(content, "|")
-			maxP, _ := strconv.Atoi(pa[0])
-			maxPSender, _ := strconv.Atoi(pa[1])
+			// received message structure: <agreed priority | agreed priority sender, "PA", transaction id, sender>
+			agreedPriorityInfo := strings.Split(content, "|")
+			maxPriority, _ := strconv.Atoi(agreedPriorityInfo[0])
+			maxPrioritySender, _ := strconv.Atoi(agreedPriorityInfo[1])
 
-			// update own msg in pq
-			pq.Update(timestamp, maxP, maxPSender)
+			pq.Update(transactionId, maxPriority, maxPrioritySender, msgType)
 
-			// deal with deliverable msg in pq
+			// process transaction
 			ProcessPQ()
 		}
 	}
 }
 
-func Multicast(msg string, msgType string, timestamp string) {
-	// multicast
-	for key, _ := range NodesToPorts{
-		// fmt.Println(key + " " + value.Address + " " + value.Port)
-		if key != node{
+func Multicast(msg string, msgType string, transactionId string) {
+	for key, _ := range connectedNodes {
+		if key != hostNode.Id {	
 			// send transaction msg to other nodes
-			conn := DialConnections[key]
+			conn := connectedNodes[key].Connection
+
 			// json the msg
-			msgJson := MsgJson{MsgType: msgType, Sender: node[4:], TimeStamp: timestamp, Content: msg}
+			msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode.Id}
 			err := json.NewEncoder(conn).Encode(msgJson)
 			if err != nil {
 				fmt.Println("Error encoding JSON:", err)
@@ -245,31 +265,38 @@ func Multicast(msg string, msgType string, timestamp string) {
 	}
 }
 
-// send msg format: Type + Sender + Timestamp + Content
-// Type: T(Transaction) / PP(Priority Proposed) / PA(Priority Agreed)
-// Content: T-Transaction Content; PP-Proposed Priority; PA-Agreed Priority|Agreed Priority Sender
-func sendMsg(msg string, msgType string, timestamp string) {
-	if msgType == "T" {
-		// create msg and store in pq
-		sender, _ := strconv.Atoi(node[4:])
-		p := proposedPriority
-		proposedPriority++
-		message := Message{timestamp, false, p, sender, msg}
-		Pp[timestamp] = append(Pp[timestamp], PP{sender, p})
-		pq.Push(message)
+func Unicast(msg string, msgType string, transactionId string, targetId string){
+	
+}
 
-		// multicast
-		Multicast(msg, msgType, timestamp)
+func sendMsg(msg string, msgType string, transactionId string) {
+	if msgType == "T" {
+		// create the transaction and store it into pq
+		sender, _ := strconv.Atoi(hostNode.Id)
+		proposedPriority := currentPriority
+		currentPriority++
+		transaction := Transaction{transactionId, false, proposedPriority, sender, msg}
+		SequenceOrdering[transactionId] = append(SequenceOrdering[transactionId], SequenceObject{sender, proposedPriority})
+		pq.Push(transaction)
+
+		// multicast the new transaction to other nodes
+		// <transaction content, "T", transaction id>
+		Multicast(msg, msgType, transactionId)
+
 	} else if msgType == "PP" {
-		Multicast(msg, msgType, timestamp)
+		// multicast the proposed priority to other nodes
+		// <proposed priority, "PP", transaction id>
+		Multicast(msg, msgType, transactionId)
+
 	} else if msgType == "PA" {
-		Multicast(msg, msgType, timestamp)
+		// multicast the agreed priority to other nodes
+		// <agreed priority | agreed priority sender, "PP", transaction id>
+		Multicast(msg, msgType, transactionId)
 	}
 }
 
-// send transaction msg generated by scripts
-func send() {
-	// send
+// send a new transaction generated by the script
+func sendTransaction() {
 	s := bufio.NewScanner(os.Stdin)
 	for s.Scan() {
 		timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -277,63 +304,107 @@ func send() {
 	}
 }
 
+// func CheckConnection(node *Node) {
+// 	reader := bufio.NewReader(node.Connection)
+// 	for {
+// 		_, err := reader.ReadString('\n')
+// 		if err != nil {
+// 			fmt.Println("has error!!")
+// 			log.Println(err)
+// 			delete(connectedNodes, node.Id)
+// 			return
+// 		}
+// 	}
+// }
+
+func HandleNode(node *Node) {
+	defer node.Connection.Close()
+	receiveMsg(node.Connection)
+}
+
+func monitor() {
+	for {
+		for i := 1; i <= nodeNum; i++ {
+			nodeId := "node" + strconv.Itoa(i)
+			nodeInfo := NodesToPorts[nodeId]
+
+			_, ok := connectedNodes[nodeId]
+			if ok {
+				continue
+			}
+			
+			conn, err := net.Dial("tcp", nodeInfo.Address + ":" + nodeInfo.Port)
+			if err != nil {
+				continue
+			}
+
+			node := Node {
+				Id: nodeId,
+				Address: nodeInfo.Address,
+				Port: nodeInfo.Port,
+				Connection: conn,
+			}
+			connectedNodes[nodeId] = &node
+			fmt.Println("Successfully established connection with  ", nodeId)
+			defer conn.Close()
+		}
+	}
+}
+
 func initialize() {
-	// init proposed priority
-	proposedPriority = 1
+	connectedNodes = make(map[string]*Node)
+	// current priority is 1 at the beginning
+	currentPriority = 1
 
-	// initial map
+	// initialize
 	Account = make(map[string]int)
-	Pp = make(map[string][]PP)
-	DialConnections = make(map[string]net.Conn)
-
+	SequenceOrdering = make(map[string][]SequenceObject)
 	pq := &PriorityQueue{}
 	heap.Init(pq)
 }
 
 func main() {
-	if len(os.Args) > 1{
-		node = os.Args[1]
+	if len(os.Args) > 1 {
 		configFilePath = os.Args[2]
 	} else {
 		log.Println("Please enter the node number and config file in the command line")
 	}
 
 	ReadFile(configFilePath)
-	go initialize()
 
-	// listen to port
-	listener, err := net.Listen("tcp",":" + NodesToPorts[node].Port)
+	fmt.Println("nodes to port is ", NodesToPorts)
+
+	// listen on port
+	listener, err := net.Listen("tcp", ":" + hostNode.Port)
 	if err != nil {
 		log.Println("Failed to listen on port ", err)
 	}
 	defer listener.Close()
-
 	fmt.Println("Listen successfully")
 
 	time.Sleep(10e9)
 
-	for i := 1; i <= nodeNum; i++ {
-		n := "node" + strconv.Itoa(i)
-		value := NodesToPorts[n]
-		conn, err := net.Dial("tcp",  value.Address + ":" + value.Port)
-		if err != nil {
-			log.Fatal("Connection with ", n, " failed ", err)
-		}
-		DialConnections[n] = conn
-		defer conn.Close()
-	}
+	initialize()
 
-	// send message
-	go send()
+	go monitor()
+
+	// send a new transaction
+	go sendTransaction()
 
 	for {
-		// listen
+		// listen to other nodes
 		conn, err := listener.Accept()
 
 		if err != nil {
 			log.Println("Failed to receive message ", err)
+			return
 		}
 
-		go receiveMsg(conn)
+		node := Node {
+			Connection: conn,
+		}
+
+		go CheckConnection(&node)
+		go HandleNode(&node)
 	}
 }

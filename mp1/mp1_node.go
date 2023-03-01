@@ -50,8 +50,10 @@ var Account map[string]int
 // a list of node, address/port mapping
 var NodesToPorts map[string]Node 
 
+var AddressToId map[string]string
+
 // a list of actually joined nodes
-var connectedNodes map[string]*Node 
+var connectedNodes map[string]Node 
 
 // node running on the host server
 var hostNode Node
@@ -113,6 +115,7 @@ func (pq *PriorityQueue) Top() interface{} {
 func ReadFile(path string) {
 
 	NodesToPorts = make(map[string]Node)
+	AddressToId = make(map[string]string)
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -131,16 +134,18 @@ func ReadFile(path string) {
 	for d := 0; d < nodeNum; d++ {
 		line, _ := buf.ReadString('\n')
 		nodeInfo := strings.Split(line, " ")
+		address, _ := net.LookupHost(strings.TrimSpace(nodeInfo[1]))
+		
 		node := Node {
 			Id: strings.TrimSpace(nodeInfo[0]),
-			Address: strings.TrimSpace(nodeInfo[1]), 
+			Address: address[0], 
 			Port: strings.TrimSpace(nodeInfo[2]),
 		}
 		NodesToPorts[node.Id] = node
+		AddressToId[address[0]] = strings.TrimSpace(nodeInfo[0])
 		if node.Id == os.Args[1] {
 			hostNode = node
 		}
-		fmt.Println("Nodes to Ports: ", NodesToPorts)
 	}
 
 }
@@ -184,14 +189,14 @@ func ProcessPQ() {
 	}
 }
 
-func receiveMsg(conn net.Conn) {
+func receiveMsg(conn net.Conn, id string) {
 	defer conn.Close()
 
 	for {
 		var msgJson MsgJson
 		err := json.NewDecoder(conn).Decode(&msgJson)
 		if err != nil {
-			log.Println(err)
+			delete(connectedNodes, id)
 			return
 		}
 
@@ -317,42 +322,13 @@ func sendTransaction() {
 // 	}
 // }
 
-func HandleNode(node *Node) {
-	defer node.Connection.Close()
-	receiveMsg(node.Connection)
+func HandleNode(node Node) {
+	receiveMsg(node.Connection, node.Id)
 }
 
-func monitor() {
-	for {
-		for i := 1; i <= nodeNum; i++ {
-			nodeId := "node" + strconv.Itoa(i)
-			nodeInfo := NodesToPorts[nodeId]
-
-			_, ok := connectedNodes[nodeId]
-			if ok {
-				continue
-			}
-			
-			conn, err := net.Dial("tcp", nodeInfo.Address + ":" + nodeInfo.Port)
-			if err != nil {
-				continue
-			}
-
-			node := Node {
-				Id: nodeId,
-				Address: nodeInfo.Address,
-				Port: nodeInfo.Port,
-				Connection: conn,
-			}
-			connectedNodes[nodeId] = &node
-			fmt.Println("Successfully established connection with  ", nodeId)
-			defer conn.Close()
-		}
-	}
-}
 
 func initialize() {
-	connectedNodes = make(map[string]*Node)
+	connectedNodes = make(map[string]Node)
 	// current priority is 1 at the beginning
 	currentPriority = 1
 
@@ -372,8 +348,6 @@ func main() {
 
 	ReadFile(configFilePath)
 
-	fmt.Println("nodes to port is ", NodesToPorts)
-
 	// listen on port
 	listener, err := net.Listen("tcp", ":" + hostNode.Port)
 	if err != nil {
@@ -386,7 +360,33 @@ func main() {
 
 	initialize()
 
-	go monitor()
+	fmt.Println("hello1")
+
+	for i := 1; i <= nodeNum; i++ {
+		nodeId := "node" + strconv.Itoa(i)
+		if nodeId == hostNode.Id {
+			continue
+		}
+		nodeInfo := NodesToPorts[nodeId]
+		
+		conn, err := net.Dial("tcp", nodeInfo.Address + ":" + nodeInfo.Port)
+		if err != nil {
+			fmt.Println("err ", err)
+			continue
+		}
+
+		node := Node {
+			Id: nodeId,
+			Address: nodeInfo.Address,
+			Port: nodeInfo.Port,
+			Connection: conn,
+		}
+		connectedNodes[nodeId] = node
+		fmt.Println("Successfully established connection with  ", nodeId)
+		defer conn.Close()
+	}
+
+	fmt.Println("hello2")
 
 	// send a new transaction
 	go sendTransaction()
@@ -400,11 +400,18 @@ func main() {
 			return
 		}
 
-		node := Node {
-			Connection: conn,
-		}
+		ip := conn.RemoteAddr().String()
+		
+		ipAddress := strings.Split(ip, ":")
+		fmt.Println("ip address is ", ipAddress[0])
+		fmt.Println("address to id ", AddressToId)
+		nodeId := AddressToId[ipAddress[0]]
+		fmt.Println("node id ", nodeId)
+		node := connectedNodes[nodeId]
+		fmt.Println("node is ", node)
 
-		go CheckConnection(&node)
-		go HandleNode(&node)
+
+		// go CheckConnection(&node)
+		go receiveMsg(conn, node.Id)
 	}
 }

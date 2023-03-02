@@ -219,7 +219,7 @@ func receiveMsg(conn net.Conn, id string) {
 
 		deadline := time.Now().Add(5 * time.Second)
     	conn.SetDeadline(deadline)
-		
+
 		fmt.Println("connected ", connectedNodes)
 
 		fmt.Println(msgJson)
@@ -281,13 +281,15 @@ func Multicast(msg string, msgType string, transactionId string) {
 	for key, _ := range connectedNodes {
 		if key != hostNode.Id {	
 			// send transaction msg to other nodes
-			conn := connectedNodes[key].Connection
+			if _, ok := connectedNodes[key]; ok{
+				conn := connectedNodes[key].Connection
 
-			// json the msg
-			msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode.Id}
-			err := json.NewEncoder(conn).Encode(msgJson)
-			if err != nil {
-				fmt.Println("Error encoding JSON:", err)
+				// json the msg
+				msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode.Id}
+				err := json.NewEncoder(conn).Encode(msgJson)
+				if err != nil {
+					fmt.Println("Error encoding JSON:", err)
+				}
 			}
 		}
 	}
@@ -295,15 +297,17 @@ func Multicast(msg string, msgType string, transactionId string) {
 
 func Unicast(msg string, msgType string, transactionId string, targetId string){
 	fmt.Println("targetId ", targetId)
-	conn := connectedNodes[targetId].Connection
-	fmt.Println(connectedNodes)
-	fmt.Println("unicast ", conn)
+	if _, ok := connectedNodes[targetId]; ok{
+		conn := connectedNodes[targetId].Connection
+		fmt.Println(connectedNodes)
+		fmt.Println("unicast ", conn)
 
-	msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode.Id}
-	err := json.NewEncoder(conn).Encode(msgJson)
-	if err != nil {
-		fmt.Println("Error encoding JSON:", err)
-	}
+		msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode.Id}
+		err := json.NewEncoder(conn).Encode(msgJson)
+		if err != nil {
+			fmt.Println("Error encoding JSON:", err)
+		}
+	}	
 }
 
 func sendMsg(msg string, msgType string, transactionId string, targetId string) {

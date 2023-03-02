@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"sync"
 )
 
 type Transaction struct {
@@ -46,6 +47,11 @@ var SequenceOrdering map[string][]SequenceObject
 
 // bank accounts with balance
 var Account map[string]int 
+// type Account struct{
+// 	accountLock sync.RWMutex
+// 	user string
+// 	balance int
+// }
 
 // a list of node, address/port mapping
 var NodesToPorts map[string]Node 
@@ -54,6 +60,7 @@ var AddressToId map[string]string
 
 // a list of actually joined nodes
 var connectedNodes map[string]Node 
+var NodeLock sync.RWMutex
 
 // node running on the host server
 var hostNode Node
@@ -210,14 +217,16 @@ func receiveMsg(conn net.Conn, id string) {
 			fmt.Println("check2")
 
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout(){
+				NodeLock.Lock()
 				delete(connectedNodes, id)
+				NodeLock.Unlock()
 				fmt.Println("check3")
 				return
 			}
 			continue
 		}
 
-		deadline := time.Now().Add(5 * time.Second)
+		deadline := time.Now().Add(10 * time.Second)
     	conn.SetDeadline(deadline)
 
 		fmt.Println("connected ", connectedNodes)
@@ -278,6 +287,7 @@ func receiveMsg(conn net.Conn, id string) {
 }
 
 func Multicast(msg string, msgType string, transactionId string) {
+	NodeLock.RLock()
 	for key, _ := range connectedNodes {
 		if key != hostNode.Id {	
 			// send transaction msg to other nodes
@@ -293,10 +303,11 @@ func Multicast(msg string, msgType string, transactionId string) {
 			}
 		}
 	}
+	NodeLock.RUnlock()
 }
 
 func Unicast(msg string, msgType string, transactionId string, targetId string){
-	fmt.Println("targetId ", targetId)
+	NodeLock.RLock()
 	if _, ok := connectedNodes[targetId]; ok{
 		conn := connectedNodes[targetId].Connection
 		fmt.Println(connectedNodes)
@@ -308,6 +319,7 @@ func Unicast(msg string, msgType string, transactionId string, targetId string){
 			fmt.Println("Error encoding JSON:", err)
 		}
 	}	
+	NodeLock.RUnlock()
 }
 
 func sendMsg(msg string, msgType string, transactionId string, targetId string) {
@@ -373,6 +385,8 @@ func initialize() {
 	SequenceOrdering = make(map[string][]SequenceObject)
 	pq := &PriorityQueue{}
 	heap.Init(pq)
+
+	NodeLock = sync.RWMutex{}
 }
 
 func main() {

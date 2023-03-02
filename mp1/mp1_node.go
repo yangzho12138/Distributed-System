@@ -108,6 +108,9 @@ func (pq PriorityQueue) Update(transactionId string, priority int, sender int, m
 func (pq *PriorityQueue) Top() interface{} {
 	old := *pq
 	n := len(old)
+	if n == 0{
+		return nil
+	}
 	x := old[n-1]
 	return x
 }
@@ -180,7 +183,11 @@ func ProcessTransaction(transaction Transaction) {
 // deliver a transaction from the front of pq
 func ProcessPQ() {
 	for {
-		top, _ := pq.Top().(Transaction)
+		t := pq.Top()
+		if t == nil {
+			break
+		}
+		top, _ := t.(Transaction)
 		if top.DeliverStatus == false {
 			break
 		}

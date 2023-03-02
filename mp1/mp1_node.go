@@ -105,9 +105,12 @@ func (pq PriorityQueue) Update(transactionId string, priority int, sender int, m
 		}
 	}
 }
-func (pq *PriorityQueue) Top() interface{} {
+func(pq *PriorityQueue) Top() interface{} {
 	old := *pq
 	n := len(old)
+	if n == 0 {
+		return nil
+	}
 	x := old[n-1]
 	return x
 }
@@ -178,27 +181,34 @@ func ProcessTransaction(transaction Transaction) {
 }
 
 // deliver a transaction from the front of pq
-func ProcessPQ() {
+func ProcessPQ(){
 	for {
-		top, _ := pq.Top().(Transaction)
-		if top.DeliverStatus == false {
+		t:= pq.Top()
+	 	if t == nil{
 			break
-		}
-		transaction, _ := pq.Pop().(Transaction)
-		ProcessTransaction(transaction)
+	 	}
+	 	top, _ := t.(Transaction)
+	 	if top.DeliverStatus == false {
+			break
+	 	}
+	msg, _ := pq.Pop().(Transaction)
+	ProcessTransaction(msg)
 	}
 }
-
+   
 func receiveMsg(conn net.Conn, id string) {
 	defer conn.Close()
 
+	fmt.Println("check1")
 	for {
 		var msgJson MsgJson
 		err := json.NewDecoder(conn).Decode(&msgJson)
 		if err != nil {
+			fmt.Println("check2")
 			delete(connectedNodes, id)
 			return
 		}
+		fmt.Println("connected ", connectedNodes)
 
 		content := msgJson.Content
 		msgType := msgJson.MsgType
@@ -357,34 +367,39 @@ func main() {
 
 	fmt.Println("hello1")
 
-	for i := 1; i <= nodeNum; i++ {
-		nodeId := "node" + strconv.Itoa(i)
-		if nodeId == hostNode.Id {
-			continue
+	for len(connectedNodes) < (nodeNum - 1) {
+		for i := 1; i <= nodeNum; i++ {
+			nodeId := "node" + strconv.Itoa(i)
+			if nodeId == hostNode.Id {
+				continue
+			}
+			nodeInfo := NodesToPorts[nodeId]
+			
+			conn, err := net.Dial("tcp", nodeInfo.Address + ":" + nodeInfo.Port)
+			if err != nil {
+				fmt.Println("err ", err)
+				continue
+			}
+	
+			node := Node {
+				Id: nodeId,
+				Address: nodeInfo.Address,
+				Port: nodeInfo.Port,
+				Connection: conn,
+			}
+			connectedNodes[nodeId] = node
+			fmt.Println("Successfully established connection with  ", nodeId)
+			defer conn.Close()
 		}
-		nodeInfo := NodesToPorts[nodeId]
-		
-		conn, err := net.Dial("tcp", nodeInfo.Address + ":" + nodeInfo.Port)
-		if err != nil {
-			fmt.Println("err ", err)
-			continue
-		}
-
-		node := Node {
-			Id: nodeId,
-			Address: nodeInfo.Address,
-			Port: nodeInfo.Port,
-			Connection: conn,
-		}
-		connectedNodes[nodeId] = node
-		fmt.Println("Successfully established connection with  ", nodeId)
-		defer conn.Close()
 	}
 
 	fmt.Println("hello2")
 
+	time.Sleep(10e9)
+
 	// send a new transaction
 	go sendTransaction()
+
 
 	for {
 		// listen to other nodes

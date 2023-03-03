@@ -232,6 +232,7 @@ func receiveMsg(conn net.Conn, id string) {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout(){
 				NodeLock.Lock()
 				delete(connectedNodes, id)
+				nodeNum--
 				NodeLock.Unlock()
 				return
 			}

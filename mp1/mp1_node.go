@@ -43,15 +43,15 @@ type MsgJson struct {
 	Content   string `json:"content"`
 }
 
-// store a list of transaction and their proposed priorities by all the sender
-var SequenceOrdering map[string][]SequenceObject
-
 // bank accounts with balance
 // var Account map[string]int 
 type Account struct{
 	accountLock sync.RWMutex
 	account map[string]int 
 }
+
+// store a list of transaction and their proposed priorities by all the sender
+var SequenceOrdering map[string][]SequenceObject
 
 var Accounts Account
 
@@ -270,14 +270,11 @@ func receiveMsg(conn net.Conn, id string) {
 						maxPrioritySender = SequenceOrdering[transactionId][n].Sender
 					}
 				}
+				pq.Update(transactionId, maxPriority, maxPrioritySender, msgType)
+				// sent message structure: <agreed priority | agreed priority sender, "PA", transaction id>
+				go sendMsg(strconv.Itoa(maxPriority)+"|"+strconv.Itoa(maxPrioritySender), "PA", transactionId, msgJson.Sender)
+				ProcessPQ()
 			}
-			pq.Update(transactionId, maxPriority, maxPrioritySender, msgType)
-
-			// sent message structure: <agreed priority | agreed priority sender, "PA", transaction id>
-			// TODO no need multicast
-			go sendMsg(strconv.Itoa(maxPriority)+"|"+strconv.Itoa(maxPrioritySender), "PA", transactionId, msgJson.Sender)
-
-			ProcessPQ() // TODO: shouldn't mark the transaction as deliverable at this point
 
 		} else if msgType == "PA" {
 			// received message structure: <agreed priority | agreed priority sender, "PA", transaction id, sender>
@@ -361,24 +358,6 @@ func sendTransaction() {
 		go sendMsg(s.Text(), "T", timestamp, "none")
 	}
 }
-
-// func CheckConnection(node *Node) {
-// 	reader := bufio.NewReader(node.Connection)
-// 	for {
-// 		_, err := reader.ReadString('\n')
-// 		if err != nil {
-// 			fmt.Println("has error!!")
-// 			log.Println(err)
-// 			delete(connectedNodes, node.Id)
-// 			return
-// 		}
-// 	}
-// }
-
-func HandleNode(node Node) {
-	receiveMsg(node.Connection, node.Id)
-}
-
 
 func initialize() {
 	connectedNodes = make(map[string]Node)

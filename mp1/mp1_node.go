@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 	"sync"
+	"sort"
 )
 
 type Transaction struct {
@@ -46,12 +47,13 @@ type MsgJson struct {
 var SequenceOrdering map[string][]SequenceObject
 
 // bank accounts with balance
-var Account map[string]int 
-// type Account struct{
-// 	accountLock sync.RWMutex
-// 	user string
-// 	balance int
-// }
+// var Account map[string]int 
+type Account struct{
+	accountLock sync.RWMutex
+	account map[string]int 
+}
+
+var Accounts Account
 
 // a list of node, address/port mapping
 var NodesToPorts map[string]Node 
@@ -157,7 +159,6 @@ func ReadFile(path string) {
 			hostNode = node
 		}
 	}
-
 }
 
 func ProcessTransaction(transaction Transaction) {
@@ -166,24 +167,39 @@ func ProcessTransaction(transaction Transaction) {
 	if transInfo[0] == "DEPOSIT" {
 		user := transInfo[1]
 		amount, _ := strconv.Atoi(transInfo[2])
-		Account[user] = Account[user] + amount
+		Accounts.accountLock.Lock()
+		Accounts.account[user] = Accounts.account[user] + amount
+		Accounts.accountLock.Unlock()
 	} else if transInfo[0] == "TRANSFER" {
 		userFrom := transInfo[1]
 		userTo := transInfo[3]
 		amount, _ := strconv.Atoi(transInfo[4])
-		if Account[userFrom] >= amount {
-			Account[userFrom] = Account[userFrom] - amount
-			Account[userTo] = Account[userTo] + amount
+		Accounts.accountLock.Lock()
+		if Accounts.account[userFrom] >= amount {
+			Accounts.account[userFrom] = Accounts.account[userFrom] - amount
+			Accounts.account[userTo] = Accounts.account[userTo] + amount
 		}
+		Accounts.accountLock.Unlock()
 	}
 
-	fmt.Print("BALANCES ")
-	for key, value := range Account {
-		if value != 0 {
-			fmt.Print(key + ":" + strconv.Itoa(value) + " ")
+	users := make([]string, 0, len(Accounts.account))
+    for k := range Accounts.account {
+        users = append(users, k)
+    }
+    sort.Strings(users)
+
+	if len(users) > 0 {
+		fmt.Print("BALANCES ")
+		Accounts.accountLock.RLock()
+		for _, key := range users {
+			value := Accounts.account[key]
+			if value != 0 {
+				fmt.Print(key + ":" + strconv.Itoa(value) + " ")
+			}
 		}
+		Accounts.accountLock.RUnlock()
+		fmt.Print("\n")
 	}
-	fmt.Print("\n")
 
 }
 
@@ -206,21 +222,17 @@ func ProcessPQ(){
 func receiveMsg(conn net.Conn, id string) {
 	defer conn.Close()
 
-
-	fmt.Println("check1")
 	for {
 		// deadline := time.Now().Add(5 * time.Second)
     	// conn.SetDeadline(deadline)
 		var msgJson MsgJson
 		err := json.NewDecoder(conn).Decode(&msgJson)
 		if err != nil {
-			fmt.Println("check2")
 
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout(){
 				NodeLock.Lock()
 				delete(connectedNodes, id)
 				NodeLock.Unlock()
-				fmt.Println("check3")
 				return
 			}
 			continue
@@ -228,10 +240,6 @@ func receiveMsg(conn net.Conn, id string) {
 
 		deadline := time.Now().Add(10 * time.Second)
     	conn.SetDeadline(deadline)
-
-		fmt.Println("connected ", connectedNodes)
-
-		fmt.Println(msgJson)
 
 		content := msgJson.Content
 		msgType := msgJson.MsgType
@@ -242,7 +250,6 @@ func receiveMsg(conn net.Conn, id string) {
 			// received message strcture: <transaction content, "T", transaction id, sender>
 			proposedPriority := currentPriority
 			currentPriority++
-			SequenceOrdering[transactionId] = append(SequenceOrdering[transactionId], SequenceObject{sender, proposedPriority})
 			transaction := Transaction{transactionId, false, proposedPriority, sender, content}
 			pq.Push(transaction)
 
@@ -296,10 +303,10 @@ func Multicast(msg string, msgType string, transactionId string) {
 
 				// json the msg
 				msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode.Id}
-				err := json.NewEncoder(conn).Encode(msgJson)
-				if err != nil {
-					fmt.Println("Error encoding JSON:", err)
-				}
+				json.NewEncoder(conn).Encode(msgJson)
+				// if err != nil {
+				// 	fmt.Println("Error encoding JSON:", err)
+				// }
 			}
 		}
 	}
@@ -310,8 +317,6 @@ func Unicast(msg string, msgType string, transactionId string, targetId string){
 	NodeLock.RLock()
 	if _, ok := connectedNodes[targetId]; ok{
 		conn := connectedNodes[targetId].Connection
-		fmt.Println(connectedNodes)
-		fmt.Println("unicast ", conn)
 
 		msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode.Id}
 		err := json.NewEncoder(conn).Encode(msgJson)
@@ -381,7 +386,10 @@ func initialize() {
 	currentPriority = 1
 
 	// initialize
-	Account = make(map[string]int)
+	Accounts = Account {
+		accountLock: sync.RWMutex{},
+		account: make(map[string]int),
+	}
 	SequenceOrdering = make(map[string][]SequenceObject)
 	pq := &PriorityQueue{}
 	heap.Init(pq)
@@ -438,8 +446,6 @@ func main() {
 		}
 	}
 
-	fmt.Println("hello2")
-
 	time.Sleep(10e9)
 
 	// send a new transaction
@@ -458,12 +464,9 @@ func main() {
 		ip := conn.RemoteAddr().String()
 		
 		ipAddress := strings.Split(ip, ":")
-		fmt.Println("ip address is ", ipAddress[0])
-		fmt.Println("address to id ", AddressToId)
+
 		nodeId := AddressToId[ipAddress[0]]
-		fmt.Println("node id ", nodeId)
 		node := connectedNodes[nodeId]
-		fmt.Println("node is ", node)
 
 
 		// go CheckConnection(&node)

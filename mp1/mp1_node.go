@@ -55,14 +55,23 @@ var SequenceOrdering map[string][]SequenceObject
 
 var Accounts Account
 
-// a list of node, address/port mapping
+// a list of node id to dns address/port mapping
 var NodesToPorts map[string]Node 
 
+// a list of ip address to node id mapping
 var AddressToId map[string]string
 
 // a list of actually joined nodes
-var connectedNodes map[string]Node 
+var ConnectedNodes map[string]Node 
+
+// lock for ConnectedNodes
 var NodeLock sync.RWMutex
+
+// lock for pq
+var PQLock sync.RWMutex
+
+// lock for SequenceOrdering
+var SequenceLock sync.RWMutex
 
 // node running on the host server
 var hostNode Node
@@ -84,18 +93,26 @@ type PriorityQueue []Transaction
 
 // methods for pq
 func (pq PriorityQueue) Len() int {
+	PQLock.RLock()
+	defer PQLock.RUnlock()
 	return len(pq)
 }
 func (pq PriorityQueue) Less(i, j int) bool {
+	PQLock.RLock()
+	defer PQLock.RUnlock()
 	if pq[i].Priority == pq[j].Priority { // break ties
 		return pq[i].Sender > pq[j].Sender
 	}
 	return pq[i].Priority < pq[j].Priority
 }
 func (pq PriorityQueue) Swap(i, j int) {
+	PQLock.Lock()
 	pq[i], pq[j] = pq[j], pq[i]
+	PQLock.Unlock()
 }
 func (pq *PriorityQueue) Pop() interface{} {
+	PQLock.Lock()
+	defer PQLock.Unlock()
 	old := *pq
 	n := len(old)
 	x := old[n-1]
@@ -103,9 +120,12 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return x
 }
 func (pq *PriorityQueue) Push(x interface{}) {
+	PQLock.Lock()
 	*pq = append(*pq, x.(Transaction))
+	PQLock.Unlock()
 }
 func (pq PriorityQueue) Update(transactionId string, priority int, sender int, msgType string) {
+	PQLock.Lock()
 	for i := 0; i < len(pq); i++ {
 		if pq[i].DeliverStatus == false && pq[i].TransactionId == transactionId {
 			pq[i].Priority = priority
@@ -113,8 +133,11 @@ func (pq PriorityQueue) Update(transactionId string, priority int, sender int, m
 			pq[i].Sender = sender
 		}
 	}
+	PQLock.Unlock()
 }
 func(pq *PriorityQueue) Top() interface{} {
+	PQLock.RLock()
+	defer PQLock.RUnlock()
 	old := *pq
 	n := len(old)
 	if n == 0{
@@ -231,7 +254,7 @@ func receiveMsg(conn net.Conn, id string) {
 
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout(){
 				NodeLock.Lock()
-				delete(connectedNodes, id)
+				delete(ConnectedNodes, id)
 				nodeNum--
 				NodeLock.Unlock()
 				return
@@ -260,10 +283,14 @@ func receiveMsg(conn net.Conn, id string) {
 		} else if msgType == "PP" {
 			// received message structure: <proposed priority, "PP", transaction id, sender>
 			proposedPriority, _ := strconv.Atoi(content)
+
+			SequenceLock.Lock()
 			SequenceOrdering[transactionId] = append(SequenceOrdering[transactionId], SequenceObject{sender, proposedPriority})
+			SequenceLock.Unlock()
 
 			maxPriority := 0
 			var maxPrioritySender int
+			SequenceLock.RLock()
 			if len(SequenceOrdering[transactionId]) == nodeNum {
 				for n := 0; n < nodeNum; n++ {
 					if maxPriority < SequenceOrdering[transactionId][n].Priority {
@@ -276,6 +303,7 @@ func receiveMsg(conn net.Conn, id string) {
 				go sendMsg(strconv.Itoa(maxPriority)+"|"+strconv.Itoa(maxPrioritySender), "PA", transactionId, msgJson.Sender)
 				ProcessPQ()
 			}
+			SequenceLock.RUnlock()
 
 		} else if msgType == "PA" {
 			// received message structure: <agreed priority | agreed priority sender, "PA", transaction id, sender>
@@ -293,11 +321,11 @@ func receiveMsg(conn net.Conn, id string) {
 
 func Multicast(msg string, msgType string, transactionId string) {
 	NodeLock.RLock()
-	for key, _ := range connectedNodes {
+	for key, _ := range ConnectedNodes {
 		if key != hostNode.Id {	
 			// send transaction msg to other nodes
-			if _, ok := connectedNodes[key]; ok{
-				conn := connectedNodes[key].Connection
+			if _, ok := ConnectedNodes[key]; ok{
+				conn := ConnectedNodes[key].Connection
 
 				// json the msg
 				msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode.Id}
@@ -313,8 +341,8 @@ func Multicast(msg string, msgType string, transactionId string) {
 
 func Unicast(msg string, msgType string, transactionId string, targetId string){
 	NodeLock.RLock()
-	if _, ok := connectedNodes[targetId]; ok{
-		conn := connectedNodes[targetId].Connection
+	if _, ok := ConnectedNodes[targetId]; ok{
+		conn := ConnectedNodes[targetId].Connection
 
 		msgJson := MsgJson{Content: msg, MsgType: msgType, TransactionId: transactionId, Sender: hostNode.Id}
 		err := json.NewEncoder(conn).Encode(msgJson)
@@ -361,7 +389,7 @@ func sendTransaction() {
 }
 
 func initialize() {
-	connectedNodes = make(map[string]Node)
+	ConnectedNodes = make(map[string]Node)
 	// current priority is 1 at the beginning
 	currentPriority = 1
 
@@ -375,6 +403,8 @@ func initialize() {
 	heap.Init(pq)
 
 	NodeLock = sync.RWMutex{}
+	PQLock = sync.RWMutex{}
+	SequenceLock = sync.RWMutex{}
 }
 
 func main() {
@@ -398,9 +428,7 @@ func main() {
 
 	initialize()
 
-	fmt.Println("hello1")
-
-	for len(connectedNodes) < (nodeNum - 1) {
+	for len(ConnectedNodes) < (nodeNum - 1) {
 		for i := 1; i <= nodeNum; i++ {
 			nodeId := "node" + strconv.Itoa(i)
 			if nodeId == hostNode.Id {
@@ -420,7 +448,7 @@ func main() {
 				Port: nodeInfo.Port,
 				Connection: conn,
 			}
-			connectedNodes[nodeId] = node
+			ConnectedNodes[nodeId] = node
 			fmt.Println("Successfully established connection with  ", nodeId)
 			defer conn.Close()
 		}
@@ -446,8 +474,7 @@ func main() {
 		ipAddress := strings.Split(ip, ":")
 
 		nodeId := AddressToId[ipAddress[0]]
-		node := connectedNodes[nodeId]
-
+		node := ConnectedNodes[nodeId]
 
 		// go CheckConnection(&node)
 		go receiveMsg(conn, node.Id)

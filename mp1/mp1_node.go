@@ -205,6 +205,11 @@ func ProcessTransaction(transaction Transaction) {
 		Accounts.accountLock.Unlock()
 	}
 
+	current := strconv.FormatInt(time.Now().UnixNano(), 10)
+	
+	f, _ := os.OpenFile("log.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f.WriteString(transaction.TransactionId + " " + current + "\n") // unit in nanosecond
+
 	users := make([]string, 0, len(Accounts.account))
     for k := range Accounts.account {
         users = append(users, k)
@@ -388,6 +393,29 @@ func sendTransaction() {
 	}
 }
 
+func deleteFile(path string){
+	e := os.Remove(path)
+    if e != nil {
+        log.Fatal(e)
+    }
+}
+
+func removeFile(path string){
+	if fileExists(path) {
+		if err := os.Remove(path); err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
+func fileExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+	   return false
+	}
+	return !info.IsDir()
+ }
+
 func initialize() {
 	ConnectedNodes = make(map[string]Node)
 	// current priority is 1 at the beginning
@@ -405,6 +433,8 @@ func initialize() {
 	NodeLock = sync.RWMutex{}
 	PQLock = sync.RWMutex{}
 	SequenceLock = sync.RWMutex{}
+
+	removeFile("log.txt")
 }
 
 func main() {

@@ -447,12 +447,14 @@ func main() {
 	ReadFile(configFilePath)
 
 	// listen on port
-	listener, err := net.Listen("tcp", ":" + hostNode.Port)
-	if err != nil {
-		log.Println("Failed to listen on port ", err)
-	}
+	listener, _ := net.Listen("tcp", ":" + hostNode.Port)
+	// if err != nil {
+	// 	log.Println("Failed to listen on port ", err)
+	// }
 	defer listener.Close()
 	fmt.Println("Listen successfully")
+
+	fmt.Println("Please wait for around 10 seconds for all the nodes to be connected")
 
 	time.Sleep(10e9)
 
@@ -468,7 +470,7 @@ func main() {
 			
 			conn, err := net.Dial("tcp", nodeInfo.Address + ":" + nodeInfo.Port)
 			if err != nil {
-				fmt.Println("err ", err)
+				// fmt.Println("err ", err)
 				continue
 			}
 	
@@ -484,7 +486,7 @@ func main() {
 		}
 	}
 
-	time.Sleep(10e9)
+	// time.Sleep(10e9)
 
 	// send a new transaction
 	go sendTransaction()
@@ -495,7 +497,7 @@ func main() {
 		conn, err := listener.Accept()
 
 		if err != nil {
-			log.Println("Failed to receive message ", err)
+			// log.Println("Failed to receive message ", err)
 			return
 		}
 

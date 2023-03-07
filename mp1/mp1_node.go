@@ -93,26 +93,18 @@ type PriorityQueue []Transaction
 
 // methods for pq
 func (pq PriorityQueue) Len() int {
-	PQLock.RLock()
-	defer PQLock.RUnlock()
 	return len(pq)
 }
 func (pq PriorityQueue) Less(i, j int) bool {
-	PQLock.RLock()
-	defer PQLock.RUnlock()
 	if pq[i].Priority == pq[j].Priority { // break ties
 		return pq[i].Sender > pq[j].Sender
 	}
-	return pq[i].Priority < pq[j].Priority
+	return pq[i].Priority > pq[j].Priority
 }
 func (pq PriorityQueue) Swap(i, j int) {
-	PQLock.Lock()
 	pq[i], pq[j] = pq[j], pq[i]
-	PQLock.Unlock()
 }
 func (pq *PriorityQueue) Pop() interface{} {
-	PQLock.Lock()
-	defer PQLock.Unlock()
 	old := *pq
 	n := len(old)
 	x := old[n-1]
@@ -120,24 +112,21 @@ func (pq *PriorityQueue) Pop() interface{} {
 	return x
 }
 func (pq *PriorityQueue) Push(x interface{}) {
-	PQLock.Lock()
 	*pq = append(*pq, x.(Transaction))
-	PQLock.Unlock()
 }
-func (pq PriorityQueue) Update(transactionId string, priority int, sender int, msgType string) {
-	PQLock.Lock()
-	for i := 0; i < len(pq); i++ {
-		if pq[i].DeliverStatus == false && pq[i].TransactionId == transactionId {
-			pq[i].Priority = priority
-			pq[i].DeliverStatus = true
-			pq[i].Sender = sender
-		}
+func (pq *PriorityQueue) Update(transactionId string, priority int, sender int, msgType string) {
+	for i := range *pq {
+		if (*pq)[i].DeliverStatus == false && (*pq)[i].TransactionId == transactionId {
+	  		(*pq)[i].Priority = priority
+	  		(*pq)[i].DeliverStatus = true
+	  		(*pq)[i].Sender = sender
+	  		heap.Fix(pq, i)
+	  		return
+	 	}
 	}
-	PQLock.Unlock()
 }
+   
 func(pq *PriorityQueue) Top() interface{} {
-	PQLock.RLock()
-	defer PQLock.RUnlock()
 	old := *pq
 	n := len(old)
 	if n == 0{
@@ -273,14 +262,17 @@ func receiveMsg(conn net.Conn, id string) {
 		content := msgJson.Content
 		msgType := msgJson.MsgType
 		transactionId := msgJson.TransactionId
-		sender := (int)(msgJson.Sender[4])
+		sender, _ := strconv.Atoi(string(msgJson.Sender[4]))
 
 		if msgType == "T" {
 			// received message strcture: <transaction content, "T", transaction id, sender>
 			proposedPriority := currentPriority
 			currentPriority++
 			transaction := Transaction{transactionId, false, proposedPriority, sender, content}
+
+			PQLock.Lock()
 			pq.Push(transaction)
+			PQLock.Unlock()
 
 			// sent message structure: <proposed priority, "PP", transaction id>
 			go sendMsg(strconv.Itoa(proposedPriority), "PP", transactionId, msgJson.Sender)
@@ -316,7 +308,9 @@ func receiveMsg(conn net.Conn, id string) {
 			maxPriority, _ := strconv.Atoi(agreedPriorityInfo[0])
 			maxPrioritySender, _ := strconv.Atoi(agreedPriorityInfo[1])
 
+			PQLock.Lock()
 			pq.Update(transactionId, maxPriority, maxPrioritySender, msgType)
+			PQLock.Unlock()
 
 			// process transaction
 			ProcessPQ()
@@ -361,12 +355,15 @@ func Unicast(msg string, msgType string, transactionId string, targetId string){
 func sendMsg(msg string, msgType string, transactionId string, targetId string) {
 	if msgType == "T" {
 		// create the transaction and store it into pq
-		sender, _ := strconv.Atoi(hostNode.Id)
+		sender, _ := strconv.Atoi(string(hostNode.Id[4]))
 		proposedPriority := currentPriority
 		currentPriority++
 		transaction := Transaction{transactionId, false, proposedPriority, sender, msg}
 		SequenceOrdering[transactionId] = append(SequenceOrdering[transactionId], SequenceObject{sender, proposedPriority})
+
+		PQLock.Lock()
 		pq.Push(transaction)
+		PQLock.Unlock()
 
 		// multicast the new transaction to other nodes
 		// <transaction content, "T", transaction id>

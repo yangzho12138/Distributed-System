@@ -18,7 +18,9 @@ package raft
 //
 
 import (
+	"math/rand"
 	"sync"
+	"time"
 )
 import "sync/atomic"
 import "raft/labrpc"
@@ -80,6 +82,56 @@ type Raft struct {
 	// volatile state on leaders - reinitialized after election
 	nextIndex	[]int // for each server, index of the next log entry to send to that server
 	matchIndex	[]int // for each server, index of highest log entry known to be replicated on server
+}
+
+func (rf *Raft) startElection() {
+	for{
+		// set timeout
+		r := rand.New(rand.NewSource(time.Now().UnixNano()))
+		time.Sleep(time.Duration(r.Intn(150) + 200) * time.Millisecond)
+
+		// TODO: receive heartbeat -> reset timeout
+
+
+		voted := 0
+		// do not receive heartbeat -> start election
+		for i:=0; i<len(rf.peers); i++ {
+			if i != rf.me {
+				var args RequestVoteArgs
+				var reply RequestVoteReply
+				args.Term = rf.currentTerm
+				args.CandidateId = rf.me
+				args.LastLogIndex = rf.log[len(rf.log)-1].Index
+				args.LastLogTerm = rf.log[len(rf.log)-1].Term
+				// send request vote rpc
+				rpcResult := rf.sendRequestVote(i, &args, &reply)
+				// rpc call success
+				if rpcResult {
+					if reply.VoteGranted {
+						voted++
+					} else {
+						if reply.Term > rf.currentTerm {
+							rf.currentTerm = reply.Term
+							rf.state = Follower
+						}
+					}
+				}
+			}
+		}
+
+		// get majority votes - become leader
+		if voted >= len(rf.peers)/2 {
+			rf.state = Leader
+			// initialize nextIndex and matchIndex
+			for i:=0; i<len(rf.peers); i++ {
+				rf.nextIndex[i] = rf.log[len(rf.log)-1].Index + 1
+				rf.matchIndex[i] = 0
+			}
+			break
+		}
+
+	}
+
 }
 
 // return currentTerm and whether this server
@@ -184,6 +236,24 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 }
 
 
+//type AppendEntriesArgs struct {
+//
+//}
+//
+//type AppendEntriesReply struct {
+//
+//}
+//
+//func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+//
+//}
+//
+//func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+//	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+//	return ok
+//}
+
+
 //
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
@@ -253,6 +323,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	//rf.nextIndex = make([]int, len(peers))
 	//rf.matchIndex = make([]int, len(peers))
 
+	// start goroutine to start election
+	go rf.startElection()
 
 	return rf
 }
